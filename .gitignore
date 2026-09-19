@@ -1,0 +1,34 @@
+# Ignore Findings & Data
+output/
+downloads/
+*.log
+*.tmp
+tmp_urls.txt
+js_list_for_xn.txt
+probed_results.json
+intelligence_map.json
+risk_analysis.json
+
+# Ignore Secrets & Config
+config/api_keys.py
+.env
+api_keys.py
+
+# Python Environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# OS Junk
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

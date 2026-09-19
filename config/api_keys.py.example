@@ -1,0 +1,19 @@
+import os
+
+# =========================================================
+# 🔑 API KEYS & INTEGRATIONS TEMPLATE
+# =========================================================
+# Copy this file to config/api_keys.py or set environment variables:
+# export TELEGRAM_BOT_TOKEN="your_bot_token"
+# export TELEGRAM_CHAT_ID="your_chat_id"
+# export CHAOS_KEY="your_chaos_key"
+# export GITHUB_TOKEN="your_github_token"
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+CHAOS_KEY = os.getenv("CHAOS_KEY", "")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+SHODAN_API_KEY = os.getenv("SHODAN_API_KEY", "")
+CENSYS_API_ID = os.getenv("CENSYS_API_ID", "")
+CENSYS_API_SECRET = os.getenv("CENSYS_API_SECRET", "")
+SECURITYTRAILS_API_KEY = os.getenv("SECURITYTRAILS_API_KEY", "")
