@@ -40,6 +40,21 @@ def resolve_dir_wordlist():
 
 DIR_WORDLIST = resolve_dir_wordlist()
 
+BUNDLED_API = os.path.join(CONFIG_DIR, "wordlists", "api_routes.txt")
+POSSIBLE_API_WORDLISTS = [
+    BUNDLED_API,
+    "/usr/share/seclists/Discovery/Web-Content/common-api-endpoints-mazen160.txt",
+    "/usr/share/seclists/Discovery/Web-Content/api/api-endpoints.txt"
+]
+
+def resolve_api_wordlist():
+    for path in POSSIBLE_API_WORDLISTS:
+        if path and os.path.exists(path) and os.path.getsize(path) > 0:
+            return path
+    return BUNDLED_API
+
+API_WORDLIST = resolve_api_wordlist()
+
 # =========================================================
 # 🌐 DNS RESOLVERS RESOLUTION
 # =========================================================

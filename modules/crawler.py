@@ -15,8 +15,9 @@ from config.tools import (
 from core.utils import get_tool_timeout
 from core.output import save_txt, unique_list, debug_log
 from core.runner import run_command, run_command_with_input
+from core.filter import filter_urls_multi_domain
 
-def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None):
+def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all_domains=None):
     if not targets or not is_tool_available(KATANA):
         return [], []
     print("\n[+] Running Katana (Active Spidering)")
@@ -57,6 +58,15 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None):
                     js_files.add(url)
                 else:
                     endpoints.add(url)
+
+    # 🌐 Scope filter — drop URLs not belonging to any scanned domain
+    effective_domains = all_domains
+    if not effective_domains and targets:
+        from core.filter import _url_host
+        effective_domains = list(set(_url_host(t) for t in targets if _url_host(t)))
+    if effective_domains:
+        js_files = set(filter_urls_multi_domain(list(js_files), effective_domains))
+        endpoints = set(filter_urls_multi_domain(list(endpoints), effective_domains))
                     
     print(f"[+] Katana found {len(js_files)} JS files and {len(endpoints)} active endpoints")
     
@@ -72,7 +82,7 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None):
     
     return list(js_files), list(endpoints)
 
-def run_hakrawler(targets, paths, debug=False, base_latency=5):
+def run_hakrawler(targets, paths, debug=False, base_latency=5, all_domains=None):
     if not targets or not is_tool_available(HAKRAWLER):
         return [], []
     print("\n[+] Running Hakrawler (Fast Spidering)")
@@ -108,6 +118,15 @@ def run_hakrawler(targets, paths, debug=False, base_latency=5):
                     js_files.add(url)
                 else:
                     endpoints.add(url)
+
+    # 🌐 Scope filter — drop URLs not belonging to any scanned domain
+    effective_domains = all_domains
+    if not effective_domains and targets:
+        from core.filter import _url_host
+        effective_domains = list(set(_url_host(t) for t in targets if _url_host(t)))
+    if effective_domains:
+        js_files = set(filter_urls_multi_domain(list(js_files), effective_domains))
+        endpoints = set(filter_urls_multi_domain(list(endpoints), effective_domains))
                     
     print(f"[+] Hakrawler found {len(js_files)} JS files and {len(endpoints)} active endpoints")
     
@@ -254,7 +273,7 @@ def _run_urlfinder(domain, paths, base_latency=5):
     return lines
 
 
-def run_url_collection(domain, targets, paths, base_latency=5):
+def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None):
     """
     Orchestrate gau, waybackurls, gospider, waymore, and urlfinder in parallel.
     Returns (js_files, endpoints) deduplicated and filtered.
@@ -276,6 +295,10 @@ def run_url_collection(domain, targets, paths, base_latency=5):
         uf_urls  = fut_uf.result()
 
     all_raw  = unique_list(gau_urls + wb_urls + gs_urls + wm_urls + uf_urls)
+
+    # 🌐 Scope filter — drop URLs not belonging to any scanned domain
+    if all_domains:
+        all_raw = filter_urls_multi_domain(all_raw, all_domains)
 
     js_files  = set()
     endpoints = set()

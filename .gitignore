@@ -1,8 +1,11 @@
 # Ignore Findings & Data
 output/
+results/
+logs/
 downloads/
 *.log
 *.tmp
+debug.txt
 tmp_urls.txt
 js_list_for_xn.txt
 probed_results.json
@@ -11,8 +14,14 @@ risk_analysis.json
 
 # Ignore Secrets & Config
 config/api_keys.py
-.env
 api_keys.py
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+id_rsa*
 
 # Python Environment
 __pycache__/

@@ -136,9 +136,9 @@ python3 main.py -d example.com --resume
 python3 main.py -d example.com --monitor
 ```
 
-### Enable Nuclei Vulnerability Scanning
+### Enable Nuclei Vulnerability Scanning & Port Scanning
 ```bash
-python3 main.py -d example.com --nuclei
+python3 main.py -d example.com --nuclei --port-scan
 ```
 
 ### Deep Crawl & WAF Bypass Headers
@@ -161,6 +161,7 @@ python3 main.py -d example.com --deep-crawl --bypass-waf -rl 30
 | `--deep-crawl` | Flag | Recursively spider newly discovered subdomains |
 | `--bypass-waf` | Flag | Inject WAF evasion headers (`X-Forwarded-For`, etc.) |
 | `--nuclei` | Flag | Enable Nuclei vulnerability scanning on prioritized endpoints |
+| `--port-scan` | Flag | Enable port scanning with naabu (disabled by default) |
 | `-rl`, `--rate-limit` | `<int>` | Global rate limit in requests/sec across all tools |
 | `--check-tools` | Flag | Inspect availability of all core and optional tools |
 

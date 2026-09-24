@@ -43,7 +43,7 @@ High-Performance Attack Surface Discovery & Vulnerability Pipeline
 # =========================================================
 # 🚀 MAIN PIPELINE
 # =========================================================
-def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, deep_crawl=False, bypass_waf=False, run_nuclei_flag=False, custom_rate_limit=None):
+def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, deep_crawl=False, bypass_waf=False, run_nuclei_flag=False, run_port_scan_flag=False, custom_rate_limit=None, all_domains=None):
     start_time = time.time()
     print(BANNER)
     print(f"🎯 Target Domain : {domain}")
@@ -119,8 +119,12 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
     # ---------------------------------
     # 🔌 PORT SCANNING (NAABU)
     # ---------------------------------
-    open_ports = run_or_resume(resume, paths, "port_scan", f"{paths['ports']}/naabu_results.txt", "list",
-                               run_port_scan, subs, paths, base_latency=dynamic_timeout, rate_limit=custom_rate_limit)
+    open_ports = []
+    if run_port_scan_flag:
+        open_ports = run_or_resume(resume, paths, "port_scan", f"{paths['ports']}/naabu_results.txt", "list",
+                                   run_port_scan, subs, paths, base_latency=dynamic_timeout, rate_limit=custom_rate_limit)
+    else:
+        print("[*] Skipping port scan (disabled by default, use --port-scan flag to enable)")
     
     httpx_input = unique_list(subs + open_ports)
 
@@ -188,11 +192,11 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
     # 🖥️ ACTIVE CRAWLING & PASSIVE
     # ---------------------------------
     katana_js, katana_ep = run_or_resume(resume, paths, "katana", f"{paths['endpoints_raw']}/katana_raw.txt", "tuple",
-                                         run_katana, top_targets, paths, base_latency=dynamic_timeout, rate_limit=dynamic_rl) or ([], [])
+                                         run_katana, top_targets, paths, base_latency=dynamic_timeout, rate_limit=dynamic_rl, all_domains=all_domains) or ([], [])
     hakrawler_js, hakrawler_ep = run_or_resume(resume, paths, "hakrawler", f"{paths['endpoints']}/hakrawler_raw.txt", "tuple",
-                                                run_hakrawler, top_targets, paths, base_latency=dynamic_timeout) or ([], [])
+                                                run_hakrawler, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains) or ([], [])
     passive_js, passive_ep = run_or_resume(resume, paths, "passive", f"{paths['endpoints']}/passive_urls.txt", "tuple",
-                                            run_url_collection, domain, top_targets, paths, base_latency=dynamic_timeout) or ([], [])
+                                            run_url_collection, domain, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains) or ([], [])
 
     pre_collected_js = unique_list(katana_js + hakrawler_js + passive_js)
 
@@ -201,7 +205,8 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
     # ---------------------------------
     if not resume or not is_step_completed(paths, "js_enum"):
         js_files, endpoints, secrets, js_subs = run_js_enum(
-            domain, top_targets, paths, base_latency=dynamic_timeout, extra_js=pre_collected_js
+            domain, top_targets, paths, base_latency=dynamic_timeout, extra_js=pre_collected_js,
+            all_domains=all_domains
         )
         save_state(paths, "js_enum")
     else:
@@ -232,7 +237,7 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
     # 🧹 JS FILTERING
     # ---------------------------------
     if not resume or not is_step_completed(paths, "js_filter"):
-        clean_js, high_js, clean_endpoints, high_ep = run_js_filter(domain, js_files, endpoints, paths)
+        clean_js, high_js, clean_endpoints, high_ep = run_js_filter(domain, js_files, endpoints, paths, all_domains=all_domains)
         save_state(paths, "js_filter")
     else:
         print("[*] Skipping js_filter (already completed) - Loading filtered data...")
@@ -286,8 +291,8 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
                     print("[+] Deep Crawl: Active spidering on newly discovered assets!")
                     new_alive = [r["url"] for r in new_http if isinstance(r, dict) and r.get("url")]
                     if new_alive:
-                        new_k_js, new_k_ep = run_katana(new_alive, paths, base_latency=dynamic_timeout)
-                        new_h_js, new_h_ep = run_hakrawler(new_alive, paths, base_latency=dynamic_timeout)
+                        new_k_js, new_k_ep = run_katana(new_alive, paths, base_latency=dynamic_timeout, all_domains=all_domains)
+                        new_h_js, new_h_ep = run_hakrawler(new_alive, paths, base_latency=dynamic_timeout, all_domains=all_domains)
                         endpoints = unique_list(endpoints + new_k_ep + new_h_ep)
                         js_files = unique_list(js_files + new_k_js + new_h_js)
                         clean_endpoints = unique_list(clean_endpoints + new_k_ep + new_h_ep)
@@ -306,7 +311,7 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
             clean_endpoints = unique_list(clean_endpoints + kr_routes)
             save_txt(f"{paths['endpoints']}/all_endpoints.txt", clean_endpoints)
             
-        all_params, scored_params = run_param_discovery(domain, clean_endpoints, top_targets, paths, base_latency=dynamic_timeout)
+        all_params, scored_params = run_param_discovery(domain, clean_endpoints, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains)
         save_state(paths, "param_discovery")
     else:
         print("[*] Skipping param_discovery")
@@ -447,6 +452,7 @@ if __name__ == "__main__":
     parser.add_argument("--deep-crawl", action="store_true", help="Enable recursive crawling on newly discovered subdomains")
     parser.add_argument("--bypass-waf", action="store_true", help="Inject WAF bypass headers in probes")
     parser.add_argument("--nuclei", action="store_true", help="Enable Nuclei vulnerability scanning")
+    parser.add_argument("--port-scan", action="store_true", help="Enable port scanning with naabu (disabled by default)")
     parser.add_argument("-rl", "--rate-limit", type=int, default=None, help="Global rate limit in requests per second (e.g. 30, 50, 100)")
     parser.add_argument("--check-tools", action="store_true", help="Inspect and display status of all configured reconnaissance tools")
 
@@ -489,7 +495,19 @@ if __name__ == "__main__":
         print(f"🚀 [{idx}/{len(domains)}] RUNNING RECON PIPELINE ON: {dom}")
         print("="*80)
         try:
-            main(dom, args.output, args.top, args.resume, args.monitor, args.deep_crawl, args.bypass_waf, args.nuclei, args.rate_limit)
+            main(
+                dom,
+                output_dir=args.output,
+                top_limit=args.top,
+                resume=args.resume,
+                monitor=args.monitor,
+                deep_crawl=args.deep_crawl,
+                bypass_waf=args.bypass_waf,
+                run_nuclei_flag=args.nuclei,
+                run_port_scan_flag=args.port_scan,
+                custom_rate_limit=args.rate_limit,
+                all_domains=domains
+            )
         except Exception as e:
             print(f"[!] Critical error occurred while scanning {dom}: {e}")
             import traceback

@@ -669,24 +669,42 @@ def clean_subdomains(subs, domain):
     # Strict FQDN regex
     fqdn_regex = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
 
+    # Support single domain string or multiple domains list (e.g. from -df)
+    if isinstance(domain, (list, set, tuple)):
+        targets = [str(d).strip().lower().lstrip(".") for d in domain if d]
+    elif domain:
+        targets = [str(domain).strip().lower().lstrip(".")]
+    else:
+        targets = []
+
     for sub in subs:
-        sub = sub.strip().lower()
+        if not sub:
+            continue
+        sub = str(sub).strip().lower()
+
+        # Normalize hostname (strip protocol, path, port, credentials, wildcards)
+        if "://" in sub:
+            sub = sub.split("://", 1)[1]
+        sub = re.split(r'[/?#]', sub)[0]
+        if "@" in sub:
+            sub = sub.split("@")[-1]
+        if ":" in sub:
+            sub = sub.split(":", 1)[0]
+        if sub.startswith("*."):
+            sub = sub[2:]
+        elif sub.startswith("*"):
+            sub = sub[1:].lstrip(".")
+        sub = sub.strip().strip(".")
 
         if not sub:
             continue
 
-        if sub.startswith("*."):
-            sub = sub[2:]
-
         if "*" in sub:
             continue
 
-        if not is_valid_subdomain(sub, domain):
+        if not any(is_valid_subdomain(sub, t) for t in targets):
             continue
 
-        if "@" in sub:
-            continue
-            
         if not fqdn_regex.match(sub):
             continue
 

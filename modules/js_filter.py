@@ -96,12 +96,13 @@ RISK_KEYWORDS = {
 # =========================================================
 # 🧹 FILTER JS FILES (PRE-DOWNLOAD & ANALYSIS)
 # =========================================================
-def filter_js_files(js_files):
+def filter_js_files(js_files, domain=None, all_domains=None):
     """
-    Filters JS file URLs removing vendor garbage and categorizing high value scripts.
+    Filters JS file URLs removing vendor garbage, enforcing scope, and categorizing high value scripts.
     """
     clean = []
     high_value = []
+    effective_domains = all_domains if all_domains else ([domain] if domain else [])
 
     for js in js_files:
         if not js:
@@ -111,6 +112,11 @@ def filter_js_files(js_files):
         # Remove known vendor garbage
         if any(bad in js_lower for bad in BAD_JS_PATTERNS):
             continue
+
+        # If effective_domains is set, ensure external js belongs to in-scope domains
+        if effective_domains and not js.startswith("/"):
+            if not any(is_valid_subdomain(js, d) for d in effective_domains):
+                continue
 
         # Classify high interest
         if keyword_score(js) >= 4:
@@ -189,9 +195,10 @@ def normalize_and_clean_endpoint(ep):
 # =========================================================
 # 🔗 FILTER ENDPOINTS
 # =========================================================
-def filter_endpoints(endpoints, domain):
+def filter_endpoints(endpoints, domain, all_domains=None):
     clean = []
     local_prefixes = ["/home/", "/tmp/", "/var/", "/etc/", "/opt/", "/usr/", "/bin/", "/lib/", "/sys/", "/proc/", "/dev/", "/root/"]
+    effective_domains = all_domains if all_domains else ([domain] if domain else [])
 
     junk_substrings = [
         "/undefined", "undefined.js", "/null/", "/null", "null.js", 
@@ -234,7 +241,8 @@ def filter_endpoints(endpoints, domain):
         ep = normalize_and_clean_endpoint(ep)
         ep_lower = ep.lower()
 
-        if is_valid_subdomain(ep, domain) or ep.startswith("/"):
+        in_scope = ep.startswith("/") or (any(is_valid_subdomain(ep, d) for d in effective_domains) if effective_domains else is_valid_subdomain(ep, domain))
+        if in_scope:
             if ep.startswith("/") and any(ep_lower.startswith(pref) for pref in local_prefixes):
                 continue
             if any(f"/{pref.strip('/')}/" in ep_lower for pref in local_prefixes):
@@ -274,11 +282,11 @@ def categorize_risk(endpoints):
 # =========================================================
 # 🧠 MAIN FILTER FUNCTION
 # =========================================================
-def run_js_filter(domain, js_files, endpoints, paths):
+def run_js_filter(domain, js_files, endpoints, paths, all_domains=None):
     print("\n[+] JS Filtering & Intelligence (Risk Analysis)\n")
 
-    clean_js, high_js = filter_js_files(js_files)
-    clean_endpoints = filter_endpoints(endpoints, domain)
+    clean_js, high_js = filter_js_files(js_files, domain=domain, all_domains=all_domains)
+    clean_endpoints = filter_endpoints(endpoints, domain, all_domains=all_domains)
     risk_analysis = categorize_risk(clean_endpoints)
 
     save_txt(f"{paths['js']}/js_filtered.txt", clean_js)

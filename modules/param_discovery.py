@@ -10,7 +10,9 @@ from core.utils import get_tool_timeout, is_valid_subdomain
 from core.scoring import score_params, keyword_score, entropy_score
 from config.settings import ARJUN_THREADS, X8_THREADS, PARAMSPIDER_TIMEOUT, KITERUNNER_RATE_LIMIT, NOISE_PARAMS, ENTROPY_THRESHOLD
 from config.tools import ARJUN, X8, KR, PARAMSPIDER, UNFURL, QSREPLACE, is_tool_available
+from config.wordlists import API_WORDLIST
 from core.runner import run_command
+from core.filter import filter_urls_multi_domain
 
 
 # =========================================================
@@ -223,11 +225,12 @@ def run_x8(targets, paths, base_latency=5, custom_wordlist=None):
 # =========================================================
 # 🕸️ RUN PARAMSPIDER (ARCHIVE MINING)
 # =========================================================
-def run_paramspider(domain, paths, base_latency=5):
+def run_paramspider(domain, paths, base_latency=5, all_domains=None):
     if not domain:
         return []
     print(f"[+] Running ParamSpider for {domain}")
     
+    effective_domains = all_domains if all_domains else [domain]
     found_urls = []
     out_file = f"{paths['params']}/paramspider.txt"
     
@@ -245,11 +248,10 @@ def run_paramspider(domain, paths, base_latency=5):
             cwd=paths['params']
         )
         
-        # Parse stdout
+        # Parse stdout — keep only URLs belonging to any scanned domain
         for line in lines:
             line = line.strip()
-            # Tightened URL extraction to avoid progress bars or status messages
-            if line.startswith("http") and is_valid_subdomain(line, domain):
+            if line.startswith("http") and any(is_valid_subdomain(line, d) for d in effective_domains):
                 found_urls.append(line)
         
         # Fallback: ParamSpider might write its results to a file
@@ -258,7 +260,7 @@ def run_paramspider(domain, paths, base_latency=5):
             with open(results_file, "r") as f:
                 for line in f:
                     line = line.strip()
-                    if line.startswith("http") and is_valid_subdomain(line, domain):
+                    if line.startswith("http") and any(is_valid_subdomain(line, d) for d in effective_domains):
                         found_urls.append(line)
             # Cleanup the results folder
             shutil.rmtree(f"{paths['params']}/results", ignore_errors=True)
@@ -310,48 +312,68 @@ def run_kiterunner(targets, paths, base_latency=5, rate_limit=None):
             for t in kr_targets:
                 f.write(f"{t}\n")
                 
-        # Check for cached .kite wordlist or use assetnote route specification with focused depth (2500)
-        cached_kite = os.path.expanduser("~/.cache/kiterunner/wordlists/httparchive_apiroutes_2026_02_27.kite")
-        if os.path.exists(cached_kite):
-            cmd = [
-                KR, "scan", tmp_targets,
-                "-w", cached_kite,
-                "-q",
-                "-o", "json",
-                "-x", "5",
-                "-j", "20",
-                "--quarantine-threshold", "5"
+        # Resolve wordlist: use curated API routes wordlist or fallbacks
+        wordlist_to_use = API_WORDLIST
+        if not (wordlist_to_use and os.path.exists(wordlist_to_use)):
+            fallback_lists = [
+                "/usr/share/seclists/Discovery/Web-Content/common-api-endpoints-mazen160.txt",
+                "/usr/share/seclists/Discovery/Web-Content/api/api-endpoints.txt"
             ]
-        else:
-            cmd = [
-                KR, "scan", tmp_targets,
-                "-A", "apiroutes-210228:2500",
-                "-q",
-                "-o", "json",
-                "-x", "5",
-                "-j", "20",
-                "--quarantine-threshold", "5"
-            ]
+            for fl in fallback_lists:
+                if os.path.exists(fl):
+                    wordlist_to_use = fl
+                    break
+
+        # Dynamically set concurrency based on target count and rate limit
+        rl = rate_limit if rate_limit else KITERUNNER_RATE_LIMIT
+        conns_per_host = min(5, max(1, rl // 4 if rl else 5))
+        parallel_hosts = min(20, max(1, len(kr_targets)))
+
+        # Use 'brute' mode which performs direct non-interactive wordlist route brute-forcing
+        # (prevents interactive stdin prompt hang '? Continue Scanning with full wordlist? [y/N]' in 'scan' mode)
+        cmd = [
+            KR, "brute", tmp_targets,
+            "-w", wordlist_to_use,
+            "-q",
+            "-o", "json",
+            "--fail-status-codes", "404,400",
+            "-d", "0",
+            "-j", str(parallel_hosts),
+            "-x", str(conns_per_host)
+        ]
         
-        res_lines = run_command(cmd, timeout=timeout, cwd=paths['endpoints'])
+        debug_path = f"{paths['base']}/debug.txt" if paths and 'base' in paths else None
+        res_lines = run_command(cmd, timeout=timeout, debug_path=debug_path, cwd=paths['endpoints'])
         
         for line in res_lines:
             line_str = line.strip()
             if not line_str: continue
             try:
                 data = json.loads(line_str)
-                # Kiterunner JSON hit format: {"target":"https://host","path":"/api/v1","responses":[...]}
-                if "target" in data and "path" in data:
-                    t_base = str(data["target"]).rstrip("/")
-                    p_path = str(data["path"]).lstrip("/")
-                    discovered_endpoints.append(f"{t_base}/{p_path}")
-                elif "url" in data:
-                    discovered_endpoints.append(data["url"])
-                elif "target" in data:
-                    discovered_endpoints.append(data["target"])
+                # Verify status code: only keep legitimate responses (e.g. 200, 201, 204, 301, 302, 401, 403, 405, 500)
+                responses = data.get("responses", [])
+                valid_hit = False
+                if responses:
+                    for resp in responses:
+                        sc = resp.get("sc", 0)
+                        if sc and sc not in [404, 400, 0]:
+                            valid_hit = True
+                            break
+                else:
+                    valid_hit = True
+
+                if valid_hit:
+                    if "target" in data and "path" in data:
+                        t_base = str(data["target"]).rstrip("/")
+                        p_path = str(data["path"]).lstrip("/")
+                        discovered_endpoints.append(f"{t_base}/{p_path}")
+                    elif "url" in data:
+                        discovered_endpoints.append(data["url"])
+                    elif "target" in data:
+                        discovered_endpoints.append(data["target"])
             except Exception:
                 # Text parsing fallback
-                if "http" in line_str:
+                if "http" in line_str and "404" not in line_str:
                     match = re.search(r'https?://[^\s]+', line_str)
                     if match:
                         discovered_endpoints.append(match.group(0))
@@ -486,12 +508,16 @@ def generate_fuzzable_endpoints(endpoints, paths):
 # =========================================================
 # 🧠 MAIN PARAM DISCOVERY
 # =========================================================
-def run_param_discovery(domain, endpoints, top_targets, paths, base_latency=5):
+def run_param_discovery(domain, endpoints, top_targets, paths, base_latency=5, all_domains=None):
     print("\n[+] Parameter Discovery (PRO)\n")
+
+    # 🌐 Scope filter — discard any endpoints not belonging to any scanned domain before processing
+    effective_domains = all_domains if all_domains else [domain]
+    endpoints = filter_urls_multi_domain(endpoints, effective_domains)
 
     # 1. Passive Discovery
     url_params = extract_params_from_urls(endpoints)
-    ps_urls = run_paramspider(domain, paths, base_latency=base_latency)
+    ps_urls = run_paramspider(domain, paths, base_latency=base_latency, all_domains=all_domains)
     
     # ---------------------------------------------
     # 💀 DEAD-URL FILTERING (CROSS-REFERENCE HOSTS)

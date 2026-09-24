@@ -7,6 +7,7 @@ from urllib.parse import urlparse, parse_qsl, urlunparse
 from core.output import save_txt, save_json, unique_list, filter_scope, debug_log, clean_data
 from core.utils import get_tool_timeout, is_valid_subdomain
 from core.scoring import score_js
+from core.filter import filter_urls_multi_domain
 
 # -------------------------------------------------
 # 📦 Endpoint deduplication helper
@@ -955,7 +956,7 @@ def run_secretfinder(domain, js_urls, download_path, paths, base_latency=5):
 # =========================================================
 # 🧠 MAIN JS ENUM
 # =========================================================
-def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=None):
+def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=None, all_domains=None):
     print("\n[+] JavaScript Enumeration (INTELLIGENCE LAYER)\n")
 
     # 1. Passive URLs (getJS only — gau/waybackurls handled by crawler.py)
@@ -964,9 +965,10 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
     # 2. Active crawl
     crawled_urls = crawl_targets(targets, paths, base_latency=base_latency)
 
-    # 3. Merge & Filter Scope
+    # 3. Merge & Filter Scope (accept URLs belonging to ANY of the scanned domains)
     all_urls = unique_list(passive_urls + crawled_urls)
-    scoped_urls = filter_scope(all_urls, domain)
+    effective_domains = all_domains if all_domains else [domain]
+    scoped_urls = filter_urls_multi_domain(all_urls, effective_domains)
 
     # 4. Extract JS Files + merge any pre-collected JS from crawlers
     js_files = extract_js(scoped_urls)
@@ -1003,6 +1005,12 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
     combined = endpoints + xn_endpoints + api_routes + jsleak_links
     # Deduplicate while normalizing URLs
     endpoints = dedupe_endpoints(unique_list(combined))
+
+    # 🌐 Scope filter — drop JS files, endpoints & api_routes not belonging to any scanned domain
+    if effective_domains:
+        js_files = filter_urls_multi_domain(js_files, effective_domains)
+        endpoints = filter_urls_multi_domain(endpoints, effective_domains)
+        api_routes = filter_urls_multi_domain(api_routes, effective_domains)
 
     # Save discovered parameters from xnLinkFinder
     if xn_params:
@@ -1047,7 +1055,10 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
     
     # SAVE CLEANED & ORGANIZED OUTPUT (Beside originals)
     save_txt(f"{paths['js']}/urls_internal.txt", clean_data(scoped_urls))
-    save_txt(f"{paths['js']}/urls_external.txt", clean_data([u for u in all_urls if not is_valid_subdomain(u, domain)]))
+    # urls_external.txt: URLs outside ALL scanned domains (kept as intel reference only)
+    save_txt(f"{paths['js']}/urls_external.txt", clean_data(
+        [u for u in all_urls if not any(is_valid_subdomain(u, d) for d in effective_domains)]
+    ))
     save_txt(f"{paths['js']}/js_files_clean.txt", clean_data(js_files))
     save_txt(f"{paths['js']}/endpoints_clean.txt", clean_data(endpoints))
     save_txt(f"{paths['js']}/secrets_clean.txt", clean_data(secrets))
