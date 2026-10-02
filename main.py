@@ -105,9 +105,12 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
             takeover_file = f"{paths['subdomains']}/takeovers.txt"
             sub_input_file = f"{paths['subdomains']}/all.txt"
             takeover_res = run_command([SUBZY, "run", "--targets", sub_input_file, "--hide_fails"], timeout=180, cwd=paths['subdomains'])
-            if takeover_res:
-                save_txt(takeover_file, takeover_res)
-                print(f"[!] Subzy check finished. Results saved to: {takeover_file}")
+            vuln_findings = [line for line in takeover_res if any(tag in line for tag in ["[ VULNERABLE ]", "[ DISCUSSION ]"])]
+            if vuln_findings:
+                save_txt(takeover_file, vuln_findings)
+                print(f"[!] Subzy check finished. Discovered {len(vuln_findings)} potential takeover(s)! Saved to: {takeover_file}")
+            else:
+                print("[-] Subzy check finished. No subdomain takeovers detected.")
             save_state(paths, "subzy_takeover")
 
     # ---------------------------------
@@ -388,7 +391,18 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
         "github_secrets": len(load_list_from_file(f"{paths['js']}/github_secrets.txt"))
     }
 
+    vuln_dir = paths.get('params_vuln', paths['params'])
+    param_categories = {
+        "xss": len(load_list_from_file(f"{vuln_dir}/endpoints_xss.txt")),
+        "ssrf": len(load_list_from_file(f"{vuln_dir}/endpoints_ssrf.txt")),
+        "sqli": len(load_list_from_file(f"{vuln_dir}/endpoints_sqli.txt")),
+        "lfi": len(load_list_from_file(f"{vuln_dir}/endpoints_lfi.txt")),
+        "idor": len(load_list_from_file(f"{vuln_dir}/endpoints_idor.txt"))
+    }
+
     stats = {
+        "domain": domain,
+        "scan_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "subdomains": len(subs),
         "alive": len(http_results),
         "js_files": len(js_files),
@@ -401,6 +415,7 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
         "cloud_assets": len(cloud_assets),
         "safety": safety_profile,
         "tool_metrics": tool_metrics,
+        "param_categories": param_categories,
         "elapsed_seconds": round(elapsed_time, 2)
     }
     

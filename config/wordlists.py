@@ -74,3 +74,19 @@ def resolve_resolvers():
     return BUNDLED_RESOLVERS
 
 RESOLVERS_LIST = resolve_resolvers()
+
+# =========================================================
+# 🔓 NOMORE403 PAYLOADS FOLDER RESOLUTION
+# =========================================================
+BUNDLED_NOMORE403_PAYLOADS = os.path.join(CONFIG_DIR, "wordlists", "nomore403_payloads")
+
+def resolve_nomore403_payloads():
+    if os.path.isdir(BUNDLED_NOMORE403_PAYLOADS):
+        return BUNDLED_NOMORE403_PAYLOADS
+    import glob
+    candidates = glob.glob(os.path.expanduser("~/go/pkg/mod/github.com/devploit/nomore403*/payloads"))
+    if candidates and os.path.isdir(candidates[0]):
+        return candidates[0]
+    return BUNDLED_NOMORE403_PAYLOADS
+
+NOMORE403_PAYLOADS = resolve_nomore403_payloads()

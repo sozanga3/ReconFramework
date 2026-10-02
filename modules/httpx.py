@@ -79,12 +79,19 @@ def parse_httpx(file_path, paths, debug=False, suffix=""):
                 try:
                     data = json.loads(line.strip())
 
+                    asn_val = data.get("asn", {})
+                    asn_str = asn_val.get("as_number", "") if isinstance(asn_val, dict) else str(asn_val or "")
+
                     record = {
                         "url": data.get("url"),
                         "status_code": data.get("status_code"),
+                        "content_length": data.get("content_length", 0),
+                        "length": data.get("content_length", 0),
                         "title": data.get("title", ""),
                         "tech": data.get("tech", []),
-                        "length": data.get("content_length", 0),
+                        "technologies": data.get("tech", []),
+                        "cdn": data.get("cdn", False),
+                        "asn": asn_str,
                     }
 
                     # 🧠 SCORING

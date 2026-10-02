@@ -322,7 +322,7 @@ def download_js_files(js_urls, download_path, base_latency=5, domain=None):
             print(f"  [js_intel] {len(subdomains)} hostnames extracted from JS URLs")
 
         # -----------------------------------------------------------------
-        # Run SUBJS on the same JS URL list to discover additional subdomains
+        # Run SUBJS on endpoints to discover additional JavaScript files
         # -----------------------------------------------------------------
         if js_urls and is_tool_available(SUBJS):
             fd_subjs, tmp_subjs = tempfile.mkstemp()
@@ -330,15 +330,22 @@ def download_js_files(js_urls, download_path, base_latency=5, domain=None):
                 with os.fdopen(fd_subjs, 'w') as f_sub:
                     for u in js_urls:
                         f_sub.write(f"{u}\n")
-                subjs_cmd = [SUBJS, "-l", tmp_subjs]
+                subjs_cmd = [SUBJS, "-i", tmp_subjs]
                 subjs_res = run_command(subjs_cmd, timeout=30, cwd=os.path.dirname(download_path))
-                subjs_domains = [line.strip() for line in subjs_res if line.strip()]
-                if subjs_domains:
-                    subjs_extra_out = os.path.join(os.path.dirname(download_path), "subdomains_from_subjs.txt")
-                    save_txt(subjs_extra_out, subjs_domains)
-                    print(f"  [subjs] {len(subjs_domains)} additional subdomains extracted from JS URLs")
-                    # Merge with previously found subdomains, ensuring uniqueness
-                    subdomains = list(set(subdomains + subjs_domains))
+                subjs_discovered = [line.strip() for line in subjs_res if line.strip().startswith("http")]
+                if subjs_discovered:
+                    subjs_extra_out = os.path.join(os.path.dirname(download_path), "js_from_subjs.txt")
+                    save_txt(subjs_extra_out, subjs_discovered)
+                    print(f"  [subjs] {len(subjs_discovered)} additional JS files extracted")
+                    for js_u in subjs_discovered:
+                        try:
+                            parsed_js = urlparse(js_u)
+                            host = parsed_js.netloc.split(":")[0]
+                            if host and (not domain or is_valid_subdomain(host, domain)):
+                                if host not in subdomains:
+                                    subdomains.append(host)
+                        except Exception:
+                            pass
             finally:
                 if os.path.exists(tmp_subjs):
                     os.remove(tmp_subjs)
@@ -746,7 +753,7 @@ def extract_source_maps(download_path, js_urls, paths, base_latency=5):
         try:
             target_name = urlparse(m_url).netloc + "_" + os.path.basename(m_url).replace(".map", "")
             out_target = os.path.join(sm_dir, target_name)
-            cmd = [SOURCEMAPPER, "-jsurl", m_url, "-output", out_target]
+            cmd = [SOURCEMAPPER, "-url", m_url, "-output", out_target]
             run_command(cmd, timeout=med_timeout, cwd=paths['js'])
             if os.path.exists(out_target) and os.listdir(out_target):
                 extracted_sources.append(out_target)

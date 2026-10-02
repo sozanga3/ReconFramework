@@ -287,6 +287,8 @@ def run_alterx(domain, paths, subs=None, debug=False, base_latency=5):
         out_file = os.path.abspath(f"{dns_dir}/alterx_alive.txt")
         if resolvers_file and os.path.exists(resolvers_file):
             resolve_cmd = [PUREDNS, "resolve", cand_file, "-r", resolvers_file, "-w", out_file, "-q", "-l", str(PUREDNS_RATE_LIMIT)]
+            if is_tool_available(MASSDNS):
+                resolve_cmd.extend(["-b", MASSDNS])
             try:
                 run_command(resolve_cmd, timeout=300, cwd=dns_dir)
                 if os.path.exists(out_file):
@@ -413,9 +415,6 @@ def run_knockpy(domain, paths, base_latency=5, debug=False):
         if not os.path.exists(output_file) and res:
             save_txt(output_file, res)
 
-        # ✅ WAIT (VERY IMPORTANT)
-        time.sleep(3)
-
         # ✅ VALIDATE FILE
         if not os.path.exists(output_file):
             if debug:
@@ -464,6 +463,8 @@ def run_knockpy(domain, paths, base_latency=5, debug=False):
                 subs.add(sub.strip())
 
         print(f"[+] knockpy: {len(subs)}")
+        raw_dir = paths.get('subdomains_raw', paths['subdomains'])
+        save_txt(f"{raw_dir}/knockpy_raw.txt", list(subs))
         return list(subs)
 
     except Exception as e:
@@ -566,6 +567,8 @@ def brute_force_subdomains(subs, domain, paths, debug=False):
     out_file = os.path.abspath(f"{paths['subdomains']}/puredns.txt")
     # puredns resolve with silence, quiet mode, and strict rate limiting
     cmd = [PUREDNS, "resolve", perm_file, "-r", resolvers_file, "-w", out_file, "-q", "-l", str(PUREDNS_RATE_LIMIT)]
+    if is_tool_available(MASSDNS):
+        cmd.extend(["-b", MASSDNS])
     
     try:
         # Give it a safe timeout, as millions of permutations could otherwise hang
@@ -624,6 +627,8 @@ def filter_wildcards(subs, domain, paths, debug=False):
     
     if resolvers_file and os.path.exists(resolvers_file) and is_tool_available(PUREDNS):
         cmd = [PUREDNS, "resolve", input_file, "-r", resolvers_file, "-w", out_file, "-q", "-l", str(PUREDNS_RATE_LIMIT)]
+        if is_tool_available(MASSDNS):
+            cmd.extend(["-b", MASSDNS])
         try:
             run_command(cmd, timeout=3600)
             if os.path.exists(out_file):

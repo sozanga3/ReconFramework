@@ -1,6 +1,7 @@
 import os
 import re
 from config.tools import WAFW00F, NOMORE403, is_tool_available
+from config.wordlists import NOMORE403_PAYLOADS
 from core.output import save_txt, unique_list
 from core.utils import get_tool_timeout
 from core.runner import run_command
@@ -30,13 +31,13 @@ def detect_waf(url):
 
     print(f"[?] Checking for WAF on {url}")
     try:
-        cmd = [WAFW00F, "-a", url]
+        cmd = [WAFW00F, "--no-colors", "-a", url]
         res_lines = run_command(cmd, timeout=45)
         output = "\n".join(res_lines)
         
-        match = re.search(r"is behind (.*)", output)
+        match = re.search(r"is behind (.*?)(?:\s+WAF|\.|$)", output)
         if match:
-            waf_name = match.group(1).strip()
+            waf_name = match.group(1).strip().rstrip(".")
             print(f"[!] WAF Detected: {waf_name}")
             return waf_name
         
@@ -106,7 +107,9 @@ def run_nomore403(endpoints_403, paths, base_latency=5):
     
     for ep in endpoints_403[:15]:
         try:
-            cmd = [NOMORE403, "-u", ep]
+            cmd = [NOMORE403, "-u", ep, "--no-banner"]
+            if os.path.exists(NOMORE403_PAYLOADS):
+                cmd.extend(["-f", NOMORE403_PAYLOADS])
             lines = run_command(cmd, timeout=med_timeout, cwd=paths['endpoints'])
             for l in lines:
                 l_str = l.strip()

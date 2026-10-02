@@ -45,23 +45,15 @@ def extract_params_from_urls(urls):
 
     # 2. Deep extraction with unfurl if available
     if is_tool_available(UNFURL):
-        fd, tmp_path = tempfile.mkstemp()
         try:
-            with os.fdopen(fd, 'w') as f:
-                for u in urls:
-                    f.write(f"{u}\n")
-            cmd = [UNFURL, "keys", tmp_path]
-            res_lines = run_command(cmd, timeout=30, cwd=os.path.dirname(tmp_path))
+            from core.runner import run_command_with_input
+            res_lines = run_command_with_input([UNFURL, "keys"], "\n".join(urls) + "\n", timeout=30)
             for line in res_lines:
                 k = line.strip()
                 if k:
                     params.add(k)
         except Exception:
             pass
-        finally:
-            if os.path.exists(tmp_path):
-                try: os.remove(tmp_path)
-                except: pass
 
     return list(params)
 
@@ -484,23 +476,16 @@ def generate_fuzzable_endpoints(endpoints, paths):
         
     print(f"[+] Generating fuzz-ready endpoints with qsreplace ({len(param_urls)} targets)...")
     
-    tmp_in = os.path.join(paths['params'], "tmp_fuzz_in.txt")
-    save_txt(tmp_in, param_urls)
-    
     fuzzable = []
     try:
-        cmd = f"cat {tmp_in} | {QSREPLACE} FUZZ"
-        from core.runner import run_command_shell
-        lines = run_command_shell(cmd, cwd=paths['params'])
+        from core.runner import run_command_with_input
+        input_data = "\n".join(param_urls) + "\n"
+        lines = run_command_with_input([QSREPLACE, "FUZZ"], input_data, timeout=60, cwd=paths['params'])
         fuzzable = unique_list([l.strip() for l in lines if l.strip().startswith("http")])
         save_txt(f"{paths['params']}/endpoints_fuzzable.txt", fuzzable)
         print(f"  [qsreplace] Generated {len(fuzzable)} fuzzable endpoints")
     except Exception as e:
         print(f"[-] Error generating fuzzable endpoints: {e}")
-    finally:
-        if os.path.exists(tmp_in):
-            try: os.remove(tmp_in)
-            except: pass
             
     return fuzzable
 
