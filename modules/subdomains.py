@@ -58,6 +58,7 @@ def subfinder(domain, paths, base_latency=5, rate_limit=None):
     raw_dir = paths.get('subdomains_raw', paths['subdomains'])
     rl = rate_limit if rate_limit else SUBFINDER_RATE_LIMIT
     res = run_command([SUBFINDER, "-d", domain, "-timeout", str(req_timeout), "-max-time", "10", "-rl", str(rl), "-silent", "-all"], timeout=SUBFINDER_TIMEOUT + 60, cwd=raw_dir)
+    res = [l.strip() for l in res if l.strip() and is_valid_subdomain(l.strip(), domain)]
     save_txt(f"{raw_dir}/subfinder_raw.txt", res)
     return res
 
@@ -67,6 +68,7 @@ def assetfinder(domain, paths):
         return []
     raw_dir = paths.get('subdomains_raw', paths['subdomains'])
     res = run_command([ASSETFINDER, "--subs-only", domain], cwd=raw_dir)
+    res = [l.strip() for l in res if l.strip() and is_valid_subdomain(l.strip(), domain)]
     save_txt(f"{raw_dir}/assetfinder_raw.txt", res)
     return res
 
@@ -76,6 +78,7 @@ def findomain(domain, paths, base_latency=5):
         return []
     raw_dir = paths.get('subdomains_raw', paths['subdomains'])
     res = run_command([FINDOMAIN, "-t", domain, "-q"], cwd=raw_dir)
+    res = [l.strip() for l in res if l.strip() and is_valid_subdomain(l.strip(), domain)]
     save_txt(f"{raw_dir}/findomain_raw.txt", res)
     return res
 
@@ -102,6 +105,7 @@ def chaos(domain, paths):
     raw_dir = paths.get('subdomains_raw', paths['subdomains'])
     debug_file = f"{paths['base']}/debug.txt"
     res = run_command([CHAOS, "-d", domain, "-silent", "-key", CHAOS_KEY], cwd=raw_dir, debug_path=debug_file)
+    res = [l.strip() for l in res if l.strip() and is_valid_subdomain(l.strip(), domain)]
     save_txt(f"{raw_dir}/chaos_raw.txt", res)
     return res
 
@@ -200,6 +204,7 @@ def subscraper(domain, paths):
         return []
     raw_dir = paths.get('subdomains_raw', paths['subdomains'])
     res = run_command(["python3", SUBSCRAPER, "-d", domain, "-silent"], cwd=raw_dir)
+    res = [l.strip() for l in res if l.strip() and is_valid_subdomain(l.strip(), domain)]
     save_txt(f"{raw_dir}/subscraper_raw.txt", res)
     return res
 
@@ -773,11 +778,6 @@ def enumerate_subdomains(domain, paths, debug=False, base_latency=5, rate_limit=
     final_subs = clean_subdomains(all_subs, domain)
 
     # ----------------------------
-    # 🛡️ WILDCARD FILTERING
-    # ----------------------------
-    final_subs = filter_wildcards(final_subs, domain, paths, debug)
-
-    # ----------------------------
     # 🧬 PERMUTATIONS & VERIFICATION (alterx & puredns)
     # ----------------------------
     alterx_alive_subs = run_alterx(domain, paths, subs=final_subs, debug=debug, base_latency=base_latency)
@@ -792,6 +792,11 @@ def enumerate_subdomains(domain, paths, debug=False, base_latency=5, rate_limit=
     if hidden_subs:
         final_subs = unique_list(final_subs + hidden_subs)
         final_subs = clean_subdomains(final_subs, domain)
+
+    # ----------------------------
+    # 🛡️ WILDCARD FILTERING
+    # ----------------------------
+    final_subs = filter_wildcards(final_subs, domain, paths, debug)
 
     # ----------------------------
     # 💾 SAVE

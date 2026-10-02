@@ -16,13 +16,26 @@ BAD_THIRD_PARTY_DOMAINS = [
     "sentry.io",
     "browser.sentry-cdn.com",
     "cloudflare.com",
-    "cloudfront.net"
+    "cloudfront.net",
+    "s3.amazonaws.com",
+    "azurewebsites.net",
+    "trafficmanager.net",
+    "github.io",
+    "wpengine.com",
+    "fastly.net",
+    "edgesuite.net",
+    "appspot.com",
+    "herokuapp.com",
+    "pantheonsite.io"
 ]
 
 def filter_urls(urls, domain):
     clean = []
     for u in urls:
-        if is_valid_subdomain(u, domain) and not any(bad in u for bad in BAD_THIRD_PARTY_DOMAINS):
+        if not is_valid_subdomain(u, domain):
+            continue
+        host = _url_host(u)
+        if not any(bad in host for bad in BAD_THIRD_PARTY_DOMAINS):
             clean.append(u)
     return list(set(clean))
 
@@ -75,6 +88,9 @@ def filter_urls_multi_domain(urls, domains):
                     seen.add(u)
                     result.append(u)
             continue
+        if any(bad in host for bad in BAD_THIRD_PARTY_DOMAINS):
+            continue
+            
         if any(is_valid_subdomain(host, d) for d in norm_domains):
             if u not in seen:
                 seen.add(u)

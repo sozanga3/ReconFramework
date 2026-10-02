@@ -159,7 +159,7 @@ def _is_wayback_online(timeout=5):
     except Exception:
         return False
 
-def _run_gau(domain, paths, base_latency=5):
+def _run_gau(domain, paths, base_latency=5, effective_domains=None):
     """Fetch archived URLs from AlienVault OTX, URLScan, Common Crawl, and Wayback via gau."""
     if not is_tool_available(GAU):
         return []
@@ -185,12 +185,14 @@ def _run_gau(domain, paths, base_latency=5):
     ]
     lines = run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
     lines = [l for l in lines if l.startswith("http")]
+    if effective_domains:
+        lines = filter_urls_multi_domain(lines, effective_domains)
     save_txt(output_file, lines)
     print(f"  [gau]          {len(lines)} URLs")
     return lines
 
 
-def _run_waybackurls(domain, paths, base_latency=5):
+def _run_waybackurls(domain, paths, base_latency=5, effective_domains=None):
     """Fetch archived URLs from the Wayback Machine via waybackurls.
 
     Performs a fast CDX connectivity check before running to avoid silent
@@ -211,12 +213,14 @@ def _run_waybackurls(domain, paths, base_latency=5):
     cmd = [WAYBACKURLS]
     lines = run_command_with_input(cmd, f"{domain}\n", timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
     lines = [l for l in lines if l.startswith("http")]
+    if effective_domains:
+        lines = filter_urls_multi_domain(lines, effective_domains)
     save_txt(output_file, lines)
     print(f"  [waybackurls]  {len(lines)} URLs")
     return lines
 
 
-def _run_gospider(targets, paths, base_latency=5):
+def _run_gospider(targets, paths, base_latency=5, effective_domains=None):
     """Active-crawl top targets with gospider and extract all discovered URLs."""
     if not targets or not is_tool_available(GOSPIDER):
         return []
@@ -237,12 +241,15 @@ def _run_gospider(targets, paths, base_latency=5):
         found = re.findall(r'https?://[^\s\]"\'>]+', line)
         all_urls.extend(found)
 
+    if effective_domains:
+        all_urls = filter_urls_multi_domain(all_urls, effective_domains)
+
     save_txt(output_file, all_urls)
     print(f"  [gospider]     {len(all_urls)} URLs")
     return all_urls
 
 
-def _run_waymore(domain, paths, base_latency=5):
+def _run_waymore(domain, paths, base_latency=5, effective_domains=None):
     """Fetch archived URLs from multiple provider sources via waymore."""
     if not is_tool_available(WAYMORE):
         return []
@@ -254,12 +261,14 @@ def _run_waymore(domain, paths, base_latency=5):
     if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
         with open(output_file, "r") as f:
             lines = [l.strip() for l in f if l.strip().startswith("http")]
+        if effective_domains:
+            lines = filter_urls_multi_domain(lines, effective_domains)
         save_txt(output_file, lines)
     print(f"  [waymore]      {len(lines)} URLs")
     return lines
 
 
-def _run_urlfinder(domain, paths, base_latency=5):
+def _run_urlfinder(domain, paths, base_latency=5, effective_domains=None):
     """Fetch passive/crawled URLs via urlfinder."""
     if not is_tool_available(URLFINDER):
         return []
@@ -268,6 +277,8 @@ def _run_urlfinder(domain, paths, base_latency=5):
     cmd = [URLFINDER, "-d", domain, "-silent"]
     lines = run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
     lines = [l.strip() for l in lines if l.strip().startswith("http")]
+    if effective_domains:
+        lines = filter_urls_multi_domain(lines, effective_domains)
     save_txt(output_file, lines)
     print(f"  [urlfinder]    {len(lines)} URLs")
     return lines
@@ -280,13 +291,15 @@ def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None)
     """
     print("\n[+] Passive URL Collection (gau | waybackurls | gospider | waymore | urlfinder)")
 
+    effective_domains = all_domains if all_domains else [domain]
+    
     # Run all five tools concurrently
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
-        fut_gau = pool.submit(_run_gau,         domain,  paths, base_latency)
-        fut_wb  = pool.submit(_run_waybackurls,  domain,  paths, base_latency)
-        fut_gs  = pool.submit(_run_gospider,     targets, paths, base_latency)
-        fut_wm  = pool.submit(_run_waymore,      domain,  paths, base_latency)
-        fut_uf  = pool.submit(_run_urlfinder,    domain,  paths, base_latency)
+        fut_gau = pool.submit(_run_gau,         domain,  paths, base_latency, effective_domains)
+        fut_wb  = pool.submit(_run_waybackurls,  domain,  paths, base_latency, effective_domains)
+        fut_gs  = pool.submit(_run_gospider,     targets, paths, base_latency, effective_domains)
+        fut_wm  = pool.submit(_run_waymore,      domain,  paths, base_latency, effective_domains)
+        fut_uf  = pool.submit(_run_urlfinder,    domain,  paths, base_latency, effective_domains)
 
         gau_urls = fut_gau.result()
         wb_urls  = fut_wb.result()

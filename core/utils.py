@@ -30,7 +30,11 @@ def is_valid_subdomain(subdomain, target_domain):
     elif sub.startswith("*"):
         sub = sub[1:].lstrip(".")
 
-    return sub == target or sub.endswith("." + target)
+    if not (sub == target or sub.endswith("." + target)):
+        return False
+
+    fqdn_regex = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
+    return bool(fqdn_regex.match(sub))
 
 def validate_tools():
     """
@@ -151,6 +155,8 @@ def clean_domain_input(raw_domain):
     if "://" in d:
         d = d.split("://", 1)[1]
     d = re.split(r'[/?#]', d)[0]
+    if "@" in d:
+        d = d.split("@")[-1]
     if ":" in d:
         d = d.split(":", 1)[0]
     d = d.lstrip(".*")

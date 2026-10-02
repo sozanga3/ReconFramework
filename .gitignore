@@ -17,6 +17,7 @@ config/api_keys.py
 api_keys.py
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 *.pfx

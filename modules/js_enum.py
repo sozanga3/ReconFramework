@@ -988,7 +988,7 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
     secrets, secrets_map = detect_secrets(download_path)
     
     # NEW: Deep Intel Extraction
-    ext_domains, int_subdomains, api_routes = extract_js_intel(download_path, domain)
+    _, int_subdomains, api_routes = extract_js_intel(download_path, domain)
 
     # NEW: Run Sourcemapper, JSLeak, SubDomainizer, and SecretFinder
     extracted_sourcemaps = extract_source_maps(download_path, js_files, paths, base_latency=base_latency)
@@ -1034,13 +1034,11 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
         "endpoints_count": len(endpoints),
         "secrets_count": len(secrets),
         "subdomains_count": len(all_subdomains),
-        "external_domains_count": len(ext_domains),
         "probed_alive": len(probed_results),
         "mappings": {
             "endpoints": endpoints_map,
             "secrets": secrets_map,
-            "subdomains": all_subdomains,
-            "external_domains": ext_domains
+            "subdomains": all_subdomains
         }
     }
 
@@ -1050,15 +1048,10 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
     save_txt(f"{paths['js']}/endpoints.txt", endpoints)
     save_txt(f"{paths['js']}/secrets.txt", secrets)
     save_txt(f"{paths['js']}/subdomains_from_js.txt", all_subdomains)
-    save_txt(f"{paths['js']}/external_domains.txt", ext_domains)
     save_txt(f"{paths['js']}/api_routes.txt", api_routes)
     
     # SAVE CLEANED & ORGANIZED OUTPUT (Beside originals)
     save_txt(f"{paths['js']}/urls_internal.txt", clean_data(scoped_urls))
-    # urls_external.txt: URLs outside ALL scanned domains (kept as intel reference only)
-    save_txt(f"{paths['js']}/urls_external.txt", clean_data(
-        [u for u in all_urls if not any(is_valid_subdomain(u, d) for d in effective_domains)]
-    ))
     save_txt(f"{paths['js']}/js_files_clean.txt", clean_data(js_files))
     save_txt(f"{paths['js']}/endpoints_clean.txt", clean_data(endpoints))
     save_txt(f"{paths['js']}/secrets_clean.txt", clean_data(secrets))
@@ -1138,7 +1131,6 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
     print(f"🔗 Unique Endpoints:    {len(endpoints)}")
     print(f"🔑 Secrets Discovered:   {len(secrets)}")
     print(f"🌐 JS Subdomains:       {len(all_subdomains)}")
-    print(f"📦 External Domains:    {len(ext_domains)}")
     print(f"✅ Probed (Alive):      {len(probed_results)}")
     print("-" * 50)
 

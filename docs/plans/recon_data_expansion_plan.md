@@ -1,7 +1,7 @@
 # 🎯 Implementation Plan: Reconnaissance Data Expansion Engine
 
 ## Goal Description
-The objective is to expand the reconnaissance coverage and data yield of **Recon Framework v3.2.0** (`sozanga3/ReconFramework`). Currently, the framework excels at discovering subdomains, crawling endpoints, and discovering parameters. However, significant attack surface intelligence remains untapped:
+The objective is to expand the reconnaissance coverage and data yield of **Recon Framework v3.2.1** (`sozanga3/ReconFramework`). Currently, the framework excels at discovering subdomains, crawling endpoints, and discovering parameters. However, significant attack surface intelligence remains untapped:
 1. **Full DNS Architecture & Zone Transfers**: Extracting complete DNS record sets (`TXT`, `CNAME`, `MX`, `NS`, `A`, `AAAA`) and testing for DNS Zone Transfers (`AXFR`).
 2. **Network Infrastructure & ASN / Origin Discovery**: Mapping discovered IPs to ASNs, identifying dedicated CIDR blocks, and isolating potential origin IPs by filtering out CDN/Cloudflare/Akamai proxy nodes.
 3. **Favicon Fingerprinting & Origin Cross-Correlation**: Extracting and indexing Favicon Murmur3/MD5 hashes via `httpx` to locate hidden portals, dev instances, and Spring Boot / Jenkins / Keycloak assets.

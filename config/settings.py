@@ -2,6 +2,8 @@
 # ⚙️ GLOBAL TOOL SETTINGS - BALANCED PRODUCTION
 # =========================================================
 
+FRAMEWORK_VERSION = "3.2.1"
+
 # --- Subdomain Enumeration ---
 AMASS_TIMEOUT = 5            # 5 minutes (balanced production)
 AMASS_MAX_DNS_QUERIES = 150  

@@ -1,4 +1,4 @@
-# ⚡ Recon Framework v3.2.0: Attack Surface Intelligence Engine
+# ⚡ Recon Framework v3.2.1: Attack Surface Intelligence Engine
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-brightgreen.svg)](https://www.python.org/)
@@ -14,7 +14,7 @@
 
 Modern external attack surfaces are dynamic, distributed across multi-cloud environments, and guarded by Web Application Firewalls (WAFs). Standard recon scripts often flood operators with noise, trigger IP bans, or leak scope. 
 
-**Recon Framework v3.2.0** is engineered around four core tenets:
+**Recon Framework v3.2.1** is engineered around four core tenets:
 
 1. **Intelligence Over Volume**: Instead of hoarding millions of dead or duplicate URLs, the engine applies multi-layer filtering (extension pruning, third-party vendor JS elimination, entropy analysis, and RFC-compliant scope validation) to isolate exploitable, high-value assets.
 2. **Recursive Intelligence Feedback Loops**: Discovered JavaScript bundles and API routes are parsed dynamically for new hostnames, which are validated against strict scope invariants and fed back into active DNS resolution and HTTP probing.

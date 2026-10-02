@@ -30,12 +30,12 @@ from modules.github_recon import github_endpoints, github_secrets
 from modules.port_scan import run_port_scan
 from core.state import is_step_completed, save_state, run_or_resume, load_list_from_file, load_json_from_file
 from config.tools import SUBZY, is_tool_available
-from config.settings import DEBUG_MODE
+from config.settings import DEBUG_MODE, FRAMEWORK_VERSION
 from core.runner import run_command
 
-BANNER = """
+BANNER = f"""
 ================================================================================
-⚡ RECON FRAMEWORK v3.2.0: THE INTELLIGENCE ENGINE
+⚡ RECON FRAMEWORK v{FRAMEWORK_VERSION}: THE INTELLIGENCE ENGINE
 High-Performance Attack Surface Discovery & Vulnerability Pipeline
 ================================================================================
 """
