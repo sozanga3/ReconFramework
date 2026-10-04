@@ -60,3 +60,17 @@ def notify_scan_complete(domain, stats):
     )
     return send_notification(msg)
 
+
+def notify_scan_interrupted(domain, stats):
+    msg = (
+        f"⚠️ <b>Recon Interrupted (Emergency Checkpoint Saved)</b>\n"
+        f"🎯 Target: <code>{domain}</code>\n\n"
+        f"🔹 Subdomains: <code>{stats.get('subdomains', 0)}</code>\n"
+        f"🔹 Alive: <code>{stats.get('alive', 0)}</code>\n"
+        f"🔹 Endpoints: <code>{stats.get('endpoints', 0)}</code>\n"
+        f"💾 Checkpoint saved to: <code>output/{domain}/stats.json</code>\n"
+        f"🔄 Resume with: <code>python3 main.py -d {domain} --resume</code>"
+    )
+    return send_notification(msg)
+
+

@@ -3,7 +3,8 @@ import re
 import requests
 import time
 import shutil
-from config.settings import HTTPX_TIMEOUT, AMASS_TIMEOUT
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+from config.settings import HTTPX_TIMEOUT, AMASS_TIMEOUT, NOISE_PARAMS
 from config.tools import CORE_TOOLS, OPTIONAL_TOOLS, ALL_TOOLS, is_tool_available
 
 def is_valid_subdomain(subdomain, target_domain):
@@ -390,6 +391,7 @@ def reconstruct_urls_list(items, default_domain=None, default_scheme="https", ef
         url = reconstruct_url(item, default_domain=default_domain, default_scheme=default_scheme)
         if not url or not is_valid_url(url):
             continue
+        url = strip_tracking_parameters(url)
         if norm_domains:
             try:
                 host = urlparse(url).netloc.split(":")[0].lower()
@@ -401,3 +403,52 @@ def reconstruct_urls_list(items, default_domain=None, default_scheme="https", ef
             seen.add(url)
             result.append(url)
     return result
+
+
+def strip_tracking_parameters(url, extra_noise=None):
+    """
+    Strips analytics, marketing, and noise parameters from a URL query string,
+    preserving legitimate functional application parameters.
+
+    Removes:
+      - Prefix patterns: utm_*, _ga*, __cf_chl_*
+      - Common trackers: fbclid, gclid, dclid, msclkid, zanpid, mc_cid, mc_eid,
+        igshid, yclid, twclid, _gid, _fbp, _fbc, _hs*, ref, referrer
+      - Any extra parameters specified in NOISE_PARAMS from config/settings.py
+
+    Examples:
+      https://example.com/page?utm_source=twitter&utm_medium=cpc -> https://example.com/page
+      https://example.com/item?id=123&fbclid=xyz&category=books -> https://example.com/item?id=123&category=books
+    """
+    if not url or "?" not in url:
+        return url
+
+    try:
+        parsed = urlparse(url)
+        if not parsed.query:
+            return url
+
+        noise_prefixes = ("utm_", "_ga", "__cf_chl_")
+        noise_exact = {
+            "fbclid", "gclid", "dclid", "msclkid", "zanpid", "mc_cid",
+            "mc_eid", "igshid", "yclid", "twclid", "_gid", "_fbp", "_fbc",
+            "_hs", "_hsenc", "_hstc", "_hssc", "_hssrc", "ref", "referrer"
+        }
+        # Add configured noise params
+        if NOISE_PARAMS:
+            noise_exact.update(k.lower() for k in NOISE_PARAMS if k)
+        if extra_noise:
+            noise_exact.update(k.lower() for k in extra_noise if k)
+
+        pairs = parse_qsl(parsed.query, keep_blank_values=True)
+        filtered = []
+        for k, v in pairs:
+            k_lower = k.lower()
+            if any(k_lower.startswith(p) for p in noise_prefixes) or k_lower in noise_exact:
+                continue
+            filtered.append((k, v))
+
+        new_query = urlencode(filtered, doseq=True) if filtered else ""
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+    except Exception:
+        return url

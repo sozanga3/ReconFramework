@@ -43,7 +43,6 @@ def extract_params_from_urls(urls):
         except Exception:
             pass
 
-    # 2. Deep extraction with unfurl if available
     if is_tool_available(UNFURL):
         try:
             from core.runner import run_command_with_input
@@ -55,7 +54,17 @@ def extract_params_from_urls(urls):
         except Exception:
             pass
 
-    return list(params)
+    noise_prefixes = ("utm_", "_ga", "__cf_chl_")
+    noise_set = set(k.lower() for k in NOISE_PARAMS) if NOISE_PARAMS else set()
+    clean_params = []
+    for p in params:
+        p_strip = p.strip()
+        p_lower = p_strip.lower()
+        if any(p_lower.startswith(pref) for pref in noise_prefixes) or p_lower in noise_set:
+            continue
+        clean_params.append(p_strip)
+
+    return sorted(list(set(clean_params)))
 
 
 # =========================================================

@@ -1,7 +1,7 @@
 import re
 from core.output import save_txt, save_json, unique_list
 from core.scoring import keyword_score
-from core.utils import is_valid_subdomain, reconstruct_url, is_valid_url
+from core.utils import is_valid_subdomain, reconstruct_url, is_valid_url, strip_tracking_parameters
 from config.settings import EXCLUDED_EXTENSIONS
 from config.keywords import KEYWORDS
 
@@ -150,19 +150,10 @@ def reconstruct_corrupted_url(url, domain):
 # 🔗 STRIP JUNK & TRACKING QUERY PARAMS
 # =========================================================
 def strip_junk_query_params(url):
+    """Delegate to central, comprehensive strip_tracking_parameters from core.utils."""
     if not url:
         return url
-    url = re.sub(r'[\?&]__cf_chl_[^&]+', '', url)
-    url = re.sub(r'[\?&]utm_[^&]+', '', url)
-    url = re.sub(r'[\?&]_ga[^&]+', '', url)
-    url = re.sub(r'[\?&]fbclid=[^&]+', '', url)
-    url = re.sub(r'[\?&]gclid=[^&]+', '', url)
-    
-    if '?' not in url and '&' in url:
-        url = url.replace('&', '?', 1)
-        
-    url = re.sub(r'\?$', '', url)
-    return url
+    return strip_tracking_parameters(url)
 
 
 # =========================================================

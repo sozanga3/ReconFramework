@@ -12,10 +12,10 @@ from config.settings import (
 from config.tools import (
     KATANA, HAKRAWLER, GAU, WAYBACKURLS, GOSPIDER, WAYMORE, URLFINDER, is_tool_available
 )
-from core.utils import get_tool_timeout, reconstruct_url, is_valid_url
+from core.utils import get_tool_timeout, reconstruct_url, is_valid_url, strip_tracking_parameters
 from core.output import save_txt, unique_list, debug_log
 from core.runner import run_command, run_command_with_input
-from core.filter import filter_urls_multi_domain
+from core.filter import filter_urls_multi_domain, collapse_url_patterns
 
 def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all_domains=None):
     if not targets or not is_tool_available(KATANA):
@@ -55,7 +55,8 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all
                 url = reconstruct_url(raw_url, default_domain=default_target)
                 if not url or not is_valid_url(url):
                     continue
-                
+                url = strip_tracking_parameters(url)
+
                 # Global Exclusion Filter
                 if any(bad in url.lower() for bad in EXCLUDED_EXTENSIONS):
                     continue
@@ -73,8 +74,11 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all
     if effective_domains:
         js_files = set(filter_urls_multi_domain(list(js_files), effective_domains))
         endpoints = set(filter_urls_multi_domain(list(endpoints), effective_domains))
+
+    # 🚀 Collapse repetitive URL patterns to prevent downstream scan bloat & WAF bans
+    endpoints = set(collapse_url_patterns(list(endpoints), max_per_pattern=3))
                     
-    print(f"[+] Katana found {len(js_files)} JS files and {len(endpoints)} active endpoints")
+    print(f"[+] Katana found {len(js_files)} JS files and {len(endpoints)} active endpoints (clustered)")
     
     # Save clean, reconstructed URLs directly to raw output file
     save_txt(output_file, unique_list(list(js_files | endpoints)))
@@ -121,7 +125,8 @@ def run_hakrawler(targets, paths, debug=False, base_latency=5, all_domains=None)
         url = reconstruct_url(raw_url, default_domain=default_target)
         if not url or not is_valid_url(url):
             continue
-        
+        url = strip_tracking_parameters(url)
+
         # Global Exclusion Filter
         if any(bad in url.lower() for bad in EXCLUDED_EXTENSIONS):
             continue
@@ -139,8 +144,11 @@ def run_hakrawler(targets, paths, debug=False, base_latency=5, all_domains=None)
     if effective_domains:
         js_files = set(filter_urls_multi_domain(list(js_files), effective_domains))
         endpoints = set(filter_urls_multi_domain(list(endpoints), effective_domains))
+
+    # 🚀 Collapse repetitive URL patterns to prevent downstream scan bloat & WAF bans
+    endpoints = set(collapse_url_patterns(list(endpoints), max_per_pattern=3))
                     
-    print(f"[+] Hakrawler found {len(js_files)} JS files and {len(endpoints)} active endpoints")
+    print(f"[+] Hakrawler found {len(js_files)} JS files and {len(endpoints)} active endpoints (clustered)")
     
     # Save clean, reconstructed URLs directly to raw output file
     save_txt(output_file, unique_list(list(js_files | endpoints)))
@@ -203,7 +211,7 @@ def _run_gau(domain, paths, base_latency=5, effective_domains=None):
     for l in raw_lines:
         u = reconstruct_url(l, default_domain=domain)
         if u and is_valid_url(u):
-            lines.append(u)
+            lines.append(strip_tracking_parameters(u))
     if effective_domains:
         lines = filter_urls_multi_domain(lines, effective_domains)
     lines = unique_list(lines)
@@ -236,7 +244,7 @@ def _run_waybackurls(domain, paths, base_latency=5, effective_domains=None):
     for l in raw_lines:
         u = reconstruct_url(l, default_domain=domain)
         if u and is_valid_url(u):
-            lines.append(u)
+            lines.append(strip_tracking_parameters(u))
     if effective_domains:
         lines = filter_urls_multi_domain(lines, effective_domains)
     lines = unique_list(lines)
@@ -268,12 +276,12 @@ def _run_gospider(targets, paths, base_latency=5, effective_domains=None):
             for f_url in found:
                 u = reconstruct_url(f_url, default_domain=default_target)
                 if u and is_valid_url(u):
-                    all_urls.append(u)
+                    all_urls.append(strip_tracking_parameters(u))
         else:
             # If line is a URL without scheme or brackets
             u = reconstruct_url(line, default_domain=default_target)
             if u and is_valid_url(u):
-                all_urls.append(u)
+                all_urls.append(strip_tracking_parameters(u))
 
     if effective_domains:
         all_urls = filter_urls_multi_domain(all_urls, effective_domains)
@@ -298,7 +306,7 @@ def _run_waymore(domain, paths, base_latency=5, effective_domains=None):
             for l in f:
                 u = reconstruct_url(l, default_domain=domain)
                 if u and is_valid_url(u):
-                    lines.append(u)
+                    lines.append(strip_tracking_parameters(u))
         if effective_domains:
             lines = filter_urls_multi_domain(lines, effective_domains)
         lines = unique_list(lines)
@@ -319,7 +327,7 @@ def _run_urlfinder(domain, paths, base_latency=5, effective_domains=None):
     for l in raw_lines:
         u = reconstruct_url(l, default_domain=domain)
         if u and is_valid_url(u):
-            lines.append(u)
+            lines.append(strip_tracking_parameters(u))
     if effective_domains:
         lines = filter_urls_multi_domain(lines, effective_domains)
     lines = unique_list(lines)
@@ -364,6 +372,7 @@ def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None)
         url = reconstruct_url(item, default_domain=domain)
         if not url or not is_valid_url(url):
             continue
+        url = strip_tracking_parameters(url)
         # Global exclusion filter
         if any(bad in url.lower() for bad in EXCLUDED_EXTENSIONS):
             continue
@@ -371,6 +380,9 @@ def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None)
             js_files.add(url)
         else:
             endpoints.add(url)
+
+    # 🚀 Collapse repetitive endpoint patterns to eliminate downstream scan bloat
+    endpoints = set(collapse_url_patterns(list(endpoints), max_per_pattern=3))
 
     # ── Save outputs ──────────────────────────────────────────
     ep_raw_dir = paths.get('endpoints_raw', paths['endpoints'])
@@ -388,7 +400,7 @@ def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None)
         f.write(f"  • gospider:     {len(gs_urls)} URLs\n")
         f.write(f"  • waymore:      {len(wm_urls)} URLs\n")
         f.write(f"  • urlfinder:    {len(uf_urls)} URLs\n")
-        f.write(f"\n📊 After Dedup & Filter:\n")
+        f.write(f"\n📊 After Dedup & Clustering:\n")
         f.write(f"  • JS Files:     {len(js_files)}\n")
         f.write(f"  • Endpoints:    {len(endpoints)}\n")
         f.write("\n" + "-" * 60 + "\n")

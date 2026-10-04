@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 from datetime import datetime
 from config.settings import DEBUG_MODE
 
@@ -61,14 +62,24 @@ def save_json(path, data):
 # ----------------------------
 # 📊 GENERATE SUMMARY
 # ----------------------------
-def generate_summary(domain, paths, stats):
+def generate_summary(domain, paths, stats, interrupted=False):
     summary_path = f"{paths['base']}/summary.txt"
 
     with open(summary_path, "w") as f:
-        f.write(f"🎯 RECON INTELLIGENCE SUMMARY REPORT: {domain}\n")
-        f.write("=" * 60 + "\n")
-        f.write(f"📅 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write("=" * 60 + "\n\n")
+        if interrupted:
+            f.write("=" * 60 + "\n")
+            f.write(f"⚠️ EMERGENCY CHECKPOINT REPORT (SCAN INTERRUPTED): {domain}\n")
+            f.write("=" * 60 + "\n")
+            f.write(f"📅 Interrupted At: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("⚠️ Pipeline execution was stopped by user (SIGINT).\n")
+            f.write("💾 All findings collected up to this point have been safely saved.\n")
+            f.write(f"🔄 Resume Command: python3 main.py -d {domain} --resume\n")
+            f.write("=" * 60 + "\n\n")
+        else:
+            f.write(f"🎯 RECON INTELLIGENCE SUMMARY REPORT: {domain}\n")
+            f.write("=" * 60 + "\n")
+            f.write(f"📅 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("=" * 60 + "\n\n")
 
         f.write("📊 QUANTITATIVE ASSET METRICS\n")
         f.write("-" * 30 + "\n")
@@ -135,11 +146,35 @@ def generate_summary(domain, paths, stats):
         else:
             f.write("No high-value targets identified.\n")
 
+        # BROWSER TRIAGE SHORTCUT
+        f.write("\n🌐 BROWSER TRIAGE & REVIEW\n")
+        f.write("-" * 30 + "\n")
+        f.write(f"To inspect alive hosts in Firefox (batches of 10):\n")
+        f.write(f"  ./open_in_firefox.sh {paths['httpx']}/alive.txt 10\n")
+        f.write(f"Or via framework shortcut:\n")
+        f.write(f"  python3 main.py -d {domain} --review\n")
+
         f.write("\n📂 OUTPUT DIRECTORY\n")
         f.write("-" * 30 + "\n")
         f.write(f"Location: {os.path.abspath(paths['base'])}\n")
         f.write("\n" + "=" * 60 + "\n")
-        f.write("Recon Complete.\n")
+        if interrupted:
+            f.write("Scan Interrupted (Checkpoint Preserved).\n")
+        else:
+            f.write("Recon Complete.\n")
+
+    # If interrupted, write dedicated EMERGENCY_SUMMARY.txt
+    if interrupted:
+        emergency_path = f"{paths['base']}/EMERGENCY_SUMMARY.txt"
+        try:
+            shutil.copyfile(summary_path, emergency_path)
+        except Exception:
+            pass
+
+
+def generate_emergency_summary(domain, paths, stats):
+    """Convenience helper to write emergency checkpoint summary upon SIGINT."""
+    return generate_summary(domain, paths, stats, interrupted=True)
 
 
 # ----------------------------

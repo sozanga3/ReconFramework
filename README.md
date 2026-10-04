@@ -234,6 +234,17 @@ Enforce conservative request rates and inject WAF bypass headers:
 python3 main.py -d example.com --bypass-waf -rl 25
 ```
 
+### 8. Interactive Browser Triage & Tab Batch Review
+Inspect alive HTTP hosts in Firefox in controlled batches (e.g. 10 at a time with Enter-key progression):
+```bash
+# Standalone review of previous scan results
+python3 main.py -d example.com --review
+
+# Or launch directly with standalone Bash or Python scripts
+./open_in_firefox.sh output/example.com/httpx/alive.txt 10
+python3 open_in_firefox.py output/example.com/httpx/alive.txt 10
+```
+
 ---
 
 ## 📖 CLI Flag Reference
@@ -251,6 +262,8 @@ python3 main.py -d example.com --bypass-waf -rl 25
 | `--nuclei` | *None* | Enable Nuclei vulnerability scanning on prioritized endpoints |
 | `--port-scan` | *None* | Enable port scanning with Naabu (disabled by default) |
 | `-rl`, `--rate-limit` | `<int>` | Global rate limit in requests/sec across all tools |
+| `--review` | *None* | Launch interactive Firefox tab review on discovered alive targets/endpoints |
+| `--review-size` | `<int>` | Batch size for `--review` (default: 10 URLs per chunk) |
 | `--check-tools` | *None* | Inspect and display availability of all configured tools |
 
 ---

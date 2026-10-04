@@ -1,5 +1,6 @@
+import re
+from urllib.parse import urlparse, parse_qsl
 from core.utils import is_valid_subdomain, reconstruct_url, is_valid_url
-from urllib.parse import urlparse
 
 BAD_THIRD_PARTY_DOMAINS = [
     "fonts.googleapis.com",
@@ -104,3 +105,83 @@ def filter_urls_multi_domain(urls, domains):
                 seen.add(valid_u)
                 result.append(valid_u)
     return result
+
+
+# =========================================================
+# 🚀 SMART URL PATTERN CLUSTERING (ANTI-WAF & DEDUP)
+# =========================================================
+NUM_PATTERN = re.compile(r"^\d+$")
+UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{16,64}$")
+
+
+def normalize_path_pattern(path):
+    """
+    Normalizes variable path segments (numbers, UUIDs, hex hashes)
+    into tokens ({num}, {uuid}, {hash}) to allow structural clustering.
+    Preserves file extensions like .json, .php, .html, etc.
+    """
+    if not path:
+        return "/"
+    segments = path.split("/")
+    norm = []
+    for seg in segments:
+        if not seg:
+            norm.append("")
+            continue
+        if "." in seg:
+            name, ext = seg.rsplit(".", 1)
+            if NUM_PATTERN.match(name):
+                name = "{num}"
+            elif UUID_PATTERN.match(name):
+                name = "{uuid}"
+            elif HASH_PATTERN.match(name):
+                name = "{hash}"
+            norm.append(f"{name}.{ext}")
+        else:
+            if NUM_PATTERN.match(seg):
+                norm.append("{num}")
+            elif UUID_PATTERN.match(seg):
+                norm.append("{uuid}")
+            elif HASH_PATTERN.match(seg):
+                norm.append("{hash}")
+            else:
+                norm.append(seg)
+    return "/".join(norm)
+
+
+def collapse_url_patterns(urls, max_per_pattern=3):
+    """
+    Collapses repetitive URLs that share the same structural pattern
+    (scheme + host + normalized path + query parameter keys) down to
+    a maximum number of representative samples (default: 3).
+
+    Greatly accelerates downstream active fuzzing and parameter discovery
+    while eliminating WAF IP ban triggers caused by crawler pagination loops.
+    """
+    if not urls:
+        return []
+
+    pattern_counts = {}
+    collapsed = []
+    seen = set()
+
+    for u in urls:
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        try:
+            parsed = urlparse(u)
+            netloc = parsed.netloc.lower()
+            norm_path = normalize_path_pattern(parsed.path)
+            param_keys = tuple(sorted(set(k.lower() for k, _ in parse_qsl(parsed.query, keep_blank_values=True))))
+
+            pattern_key = (netloc, norm_path, param_keys)
+            count = pattern_counts.get(pattern_key, 0)
+            if count < max_per_pattern:
+                collapsed.append(u)
+                pattern_counts[pattern_key] = count + 1
+        except Exception:
+            collapsed.append(u)
+
+    return collapsed

@@ -4,6 +4,7 @@ import re
 import os
 import json
 import time
+import subprocess
 from datetime import datetime
 
 from modules.subdomains import enumerate_subdomains, clean_subdomains
@@ -16,7 +17,8 @@ from core.output import (
     save_txt,
     save_json,
     unique_list,
-    generate_summary
+    generate_summary,
+    generate_emergency_summary
 )
 from core.utils import (
     get_dynamic_timeout,
@@ -28,7 +30,12 @@ from core.utils import (
     reconstruct_urls_list,
     is_valid_url
 )
-from core.notifications import notify_scan_start, notify_vuln_found, notify_scan_complete
+from core.notifications import (
+    notify_scan_start,
+    notify_vuln_found,
+    notify_scan_complete,
+    notify_scan_interrupted
+)
 from core.scoring import rank_targets
 from modules.screenshots import run_screenshots
 from modules.nuclei_scan import run_nuclei
@@ -50,7 +57,51 @@ High-Performance Attack Surface Discovery & Vulnerability Pipeline
 """
 
 # =========================================================
-# 🚀 MAIN PIPELINE
+# 🌐 BROWSER REVIEW WORKFLOW
+# =========================================================
+def launch_browser_review(domain, output_dir=None, chunk_size=10):
+    """
+    Launches open_in_firefox on target results.
+    Prioritizes alive.txt -> endpoints.txt -> all.txt.
+    """
+    base_dir = output_dir if output_dir else f"output/{domain}"
+    alive_file = f"{base_dir}/httpx/alive.txt"
+    ep_file = f"{base_dir}/endpoints/endpoints.txt"
+    sub_file = f"{base_dir}/subdomains/all.txt"
+
+    target_file = None
+    if os.path.exists(alive_file) and os.path.getsize(alive_file) > 0:
+        target_file = alive_file
+    elif os.path.exists(ep_file) and os.path.getsize(ep_file) > 0:
+        target_file = ep_file
+    elif os.path.exists(sub_file) and os.path.getsize(sub_file) > 0:
+        target_file = sub_file
+
+    if not target_file:
+        print(f"[!] No existing results found for '{domain}' in {base_dir}.")
+        print(f"[*] Run a scan first: python3 main.py -d {domain}")
+        return False
+
+    review_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "open_in_firefox.py")
+    if not os.path.exists(review_script):
+        print(f"[!] Browser review script '{review_script}' not found.")
+        return False
+
+    print(f"\n[+] Launching Firefox Review for {domain}...")
+    print(f"    Target file: {target_file}")
+    print(f"    Chunk size:  {chunk_size}\n")
+
+    cmd = [sys.executable, review_script, "-f", target_file, "-s", str(chunk_size)]
+    try:
+        subprocess.run(cmd)
+        return True
+    except KeyboardInterrupt:
+        print("\n[!] Browser review closed by user.")
+        return True
+
+
+# =========================================================
+# 🚀 MAIN PIPELINE ENTRYPOINT (WITH EMERGENCY CHECKPOINT)
 # =========================================================
 def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, deep_crawl=False, bypass_waf=False, run_nuclei_flag=False, run_port_scan_flag=False, custom_rate_limit=None, all_domains=None):
     start_time = time.time()
@@ -74,10 +125,72 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
     notify_scan_start(domain)
 
     # ---------------------------------
-    # 📁 OUTPUT STRUCTURE & MONITORING
+    # 📁 OUTPUT STRUCTURE & CHECKPOINT STATE
     # ---------------------------------
     paths = create_output_structure(domain, output_dir)
-    
+    current_stats = {
+        "domain": domain,
+        "scan_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "subdomains": 0,
+        "alive": 0,
+        "js_files": 0,
+        "endpoints": 0,
+        "params": 0,
+        "nuclei": 0,
+        "top_targets": [],
+        "secrets": 0,
+        "ports": 0,
+        "cloud_assets": 0,
+        "safety": {"recommendation": "aggressive", "waf_ratio": 0, "wafs": []},
+        "tool_metrics": {},
+        "param_categories": {},
+        "elapsed_seconds": 0,
+        "interrupted": False
+    }
+
+    target_for_timeout = f"https://{domain}" 
+    dynamic_timeout = get_dynamic_timeout(target_for_timeout)
+
+    try:
+        _run_pipeline(
+            domain, paths, current_stats,
+            output_dir=output_dir, top_limit=top_limit, resume=resume,
+            monitor=monitor, deep_crawl=deep_crawl, bypass_waf=bypass_waf,
+            run_nuclei_flag=run_nuclei_flag, run_port_scan_flag=run_port_scan_flag,
+            custom_rate_limit=custom_rate_limit, all_domains=all_domains,
+            dynamic_timeout=dynamic_timeout, start_time=start_time
+        )
+    except KeyboardInterrupt:
+        elapsed_time = time.time() - start_time
+        current_stats["interrupted"] = True
+        current_stats["elapsed_seconds"] = round(elapsed_time, 2)
+        save_json(f"{paths['base']}/stats.json", current_stats)
+        generate_emergency_summary(domain, paths, current_stats)
+        try:
+            notify_scan_interrupted(domain, current_stats)
+        except Exception:
+            pass
+        print(f"\n\n{'='*70}")
+        print("🛑 [!] SCAN INTERRUPTED BY USER (Ctrl+C)")
+        print(f"{'='*70}")
+        print(f" [+] Target:               {domain}")
+        print(f" [+] Emergency Checkpoint: {paths['base']}/stats.json")
+        print(f" [+] Emergency Summary:    {paths['base']}/EMERGENCY_SUMMARY.txt")
+        print(f" [+] Findings Preserved:")
+        print(f"     • Subdomains:  {current_stats.get('subdomains', 0)}")
+        print(f"     • Alive Hosts: {current_stats.get('alive', 0)}")
+        print(f"     • Endpoints:   {current_stats.get('endpoints', 0)}")
+        print(f"     • Params:      {current_stats.get('params', 0)}")
+        print(f" [+] To resume anytime, run:")
+        print(f"     python3 main.py -d {domain} --resume")
+        print(f"{'='*70}\n")
+        raise
+
+
+# =========================================================
+# ⚙️ RECON PIPELINE ORCHESTRATION ENGINE
+# =========================================================
+def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, resume=False, monitor=False, deep_crawl=False, bypass_waf=False, run_nuclei_flag=False, run_port_scan_flag=False, custom_rate_limit=None, all_domains=None, dynamic_timeout=5, start_time=None):
     previous_stats = {}
     if monitor:
         stats_file = f"{paths['base']}/stats.json"
@@ -88,10 +201,6 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
                     previous_stats = json.load(f)
             except Exception:
                 pass
-            
-    # ⏱️ DYNAMIC TIMEOUT CALCULATION
-    target_for_timeout = f"https://{domain}" 
-    dynamic_timeout = get_dynamic_timeout(target_for_timeout)
 
     # ---------------------------------
     # 🌐 SUBDOMAIN ENUMERATION
@@ -100,6 +209,7 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
                          enumerate_subdomains, domain, paths, debug=DEBUG_MODE, base_latency=dynamic_timeout, rate_limit=custom_rate_limit)
 
     print(f"\n[🔥] FINAL UNIQUE SUBDOMAINS: {len(subs)}\n")
+    current_stats["subdomains"] = len(subs)
 
     if not subs:
         print("[-] No subdomains discovered. Aborting pipeline to prevent cascading errors.")
@@ -479,6 +589,8 @@ if __name__ == "__main__":
     parser.add_argument("--nuclei", action="store_true", help="Enable Nuclei vulnerability scanning")
     parser.add_argument("--port-scan", action="store_true", help="Enable port scanning with naabu (disabled by default)")
     parser.add_argument("-rl", "--rate-limit", type=int, default=None, help="Global rate limit in requests per second (e.g. 30, 50, 100)")
+    parser.add_argument("--review", action="store_true", help="Launch interactive Firefox tab review on discovered alive targets/endpoints")
+    parser.add_argument("--review-size", type=int, default=10, help="Batch size for --review (default: 10 URLs per chunk)")
     parser.add_argument("--check-tools", action="store_true", help="Inspect and display status of all configured reconnaissance tools")
 
     args = parser.parse_args()
@@ -514,26 +626,50 @@ if __name__ == "__main__":
         print("[!] No valid domains to scan.")
         sys.exit(1)
 
-    print(f"[+] Starting scanning pipeline for {len(domains)} target domain(s) sequentially...")
-    for idx, dom in enumerate(domains, 1):
-        print("\n" + "="*80)
-        print(f"🚀 [{idx}/{len(domains)}] RUNNING RECON PIPELINE ON: {dom}")
-        print("="*80)
-        try:
-            main(
-                dom,
-                output_dir=args.output,
-                top_limit=args.top,
-                resume=args.resume,
-                monitor=args.monitor,
-                deep_crawl=args.deep_crawl,
-                bypass_waf=args.bypass_waf,
-                run_nuclei_flag=args.nuclei,
-                run_port_scan_flag=args.port_scan,
-                custom_rate_limit=args.rate_limit,
-                all_domains=domains
-            )
-        except Exception as e:
-            print(f"[!] Critical error occurred while scanning {dom}: {e}")
-            import traceback
-            traceback.print_exc()
+    # 🌐 Standalone Review Mode: if only --review was requested and existing scan results are available
+    scan_flags_present = any([
+        args.resume, args.monitor, args.deep_crawl, args.bypass_waf,
+        args.nuclei, args.port_scan, args.rate_limit is not None
+    ])
+    if args.review and not scan_flags_present and len(domains) == 1:
+        dom = domains[0]
+        base_chk = args.output if args.output else f"output/{dom}"
+        if os.path.exists(f"{base_chk}/httpx/alive.txt") or os.path.exists(f"{base_chk}/endpoints/endpoints.txt"):
+            launch_browser_review(dom, output_dir=args.output, chunk_size=args.review_size)
+            sys.exit(0)
+        else:
+            print(f"[!] No existing scan results found for '{dom}' in {base_chk}.")
+            print(f"[*] Run a scan first before reviewing: python3 main.py -d {dom}")
+            sys.exit(1)
+
+    try:
+        print(f"[+] Starting scanning pipeline for {len(domains)} target domain(s) sequentially...")
+        for idx, dom in enumerate(domains, 1):
+            print("\n" + "="*80)
+            print(f"🚀 [{idx}/{len(domains)}] RUNNING RECON PIPELINE ON: {dom}")
+            print("="*80)
+            try:
+                main(
+                    dom,
+                    output_dir=args.output,
+                    top_limit=args.top,
+                    resume=args.resume,
+                    monitor=args.monitor,
+                    deep_crawl=args.deep_crawl,
+                    bypass_waf=args.bypass_waf,
+                    run_nuclei_flag=args.nuclei,
+                    run_port_scan_flag=args.port_scan,
+                    custom_rate_limit=args.rate_limit,
+                    all_domains=domains
+                )
+                if args.review:
+                    launch_browser_review(dom, output_dir=args.output, chunk_size=args.review_size)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                print(f"[!] Critical error occurred while scanning {dom}: {e}")
+                import traceback
+                traceback.print_exc()
+    except KeyboardInterrupt:
+        print("\n[!] Execution terminated by user. Exiting cleanly.")
+        sys.exit(130)
