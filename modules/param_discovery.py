@@ -6,7 +6,7 @@ import json
 import shutil
 from urllib.parse import urlparse
 from core.output import save_txt, save_json, unique_list, clean_data, debug_log
-from core.utils import get_tool_timeout, is_valid_subdomain
+from core.utils import get_tool_timeout, is_valid_subdomain, reconstruct_url, is_valid_url
 from core.scoring import score_params, keyword_score, entropy_score
 from config.settings import ARJUN_THREADS, X8_THREADS, PARAMSPIDER_TIMEOUT, KITERUNNER_RATE_LIMIT, NOISE_PARAMS, ENTROPY_THRESHOLD
 from config.tools import ARJUN, X8, KR, PARAMSPIDER, UNFURL, QSREPLACE, is_tool_available
@@ -240,11 +240,14 @@ def run_paramspider(domain, paths, base_latency=5, all_domains=None):
             cwd=paths['params']
         )
         
-        # Parse stdout — keep only URLs belonging to any scanned domain
+        # Parse stdout — reconstruct and keep only URLs belonging to any scanned domain
         for line in lines:
             line = line.strip()
-            if line.startswith("http") and any(is_valid_subdomain(line, d) for d in effective_domains):
-                found_urls.append(line)
+            if not line:
+                continue
+            u = reconstruct_url(line, default_domain=domain)
+            if u and is_valid_url(u) and any(is_valid_subdomain(u, d) for d in effective_domains):
+                found_urls.append(u)
         
         # Fallback: ParamSpider might write its results to a file
         results_file = f"{paths['params']}/results/{domain}.txt"
@@ -252,8 +255,11 @@ def run_paramspider(domain, paths, base_latency=5, all_domains=None):
             with open(results_file, "r") as f:
                 for line in f:
                     line = line.strip()
-                    if line.startswith("http") and any(is_valid_subdomain(line, d) for d in effective_domains):
-                        found_urls.append(line)
+                    if not line:
+                        continue
+                    u = reconstruct_url(line, default_domain=domain)
+                    if u and is_valid_url(u) and any(is_valid_subdomain(u, d) for d in effective_domains):
+                        found_urls.append(u)
             # Cleanup the results folder
             shutil.rmtree(f"{paths['params']}/results", ignore_errors=True)
             
@@ -355,20 +361,28 @@ def run_kiterunner(targets, paths, base_latency=5, rate_limit=None):
                     valid_hit = True
 
                 if valid_hit:
+                    raw_ep = None
                     if "target" in data and "path" in data:
                         t_base = str(data["target"]).rstrip("/")
                         p_path = str(data["path"]).lstrip("/")
-                        discovered_endpoints.append(f"{t_base}/{p_path}")
+                        raw_ep = f"{t_base}/{p_path}"
                     elif "url" in data:
-                        discovered_endpoints.append(data["url"])
+                        raw_ep = data["url"]
                     elif "target" in data:
-                        discovered_endpoints.append(data["target"])
+                        raw_ep = data["target"]
+
+                    if raw_ep:
+                        u = reconstruct_url(raw_ep)
+                        if u and is_valid_url(u):
+                            discovered_endpoints.append(u)
             except Exception:
                 # Text parsing fallback
                 if "http" in line_str and "404" not in line_str:
                     match = re.search(r'https?://[^\s]+', line_str)
                     if match:
-                        discovered_endpoints.append(match.group(0))
+                        u = reconstruct_url(match.group(0))
+                        if u and is_valid_url(u):
+                            discovered_endpoints.append(u)
 
         if os.path.exists(tmp_targets):
             os.remove(tmp_targets)
@@ -466,11 +480,17 @@ def guess_params(endpoints):
 # =========================================================
 # 🎯 GENERATE FUZZABLE ENDPOINTS (QSREPLACE)
 # =========================================================
-def generate_fuzzable_endpoints(endpoints, paths):
+def generate_fuzzable_endpoints(endpoints, paths, default_domain=None):
     """
     Passes endpoints with parameters through qsreplace to generate FUZZ-ready targets.
     """
-    param_urls = [ep for ep in endpoints if "?" in ep and ep.startswith("http")]
+    clean_urls = []
+    for ep in endpoints:
+        if "?" in ep:
+            u = reconstruct_url(ep, default_domain=default_domain)
+            if u and is_valid_url(u) and "?" in u:
+                clean_urls.append(u)
+    param_urls = unique_list(clean_urls)
     if not param_urls:
         return []
         
@@ -481,7 +501,11 @@ def generate_fuzzable_endpoints(endpoints, paths):
         from core.runner import run_command_with_input
         input_data = "\n".join(param_urls) + "\n"
         lines = run_command_with_input([QSREPLACE, "FUZZ"], input_data, timeout=60, cwd=paths['params'])
-        fuzzable = unique_list([l.strip() for l in lines if l.strip().startswith("http")])
+        for l in lines:
+            u = reconstruct_url(l.strip(), default_domain=default_domain)
+            if u and is_valid_url(u):
+                fuzzable.append(u)
+        fuzzable = unique_list(fuzzable)
         save_txt(f"{paths['params']}/endpoints_fuzzable.txt", fuzzable)
         print(f"  [qsreplace] Generated {len(fuzzable)} fuzzable endpoints")
     except Exception as e:
@@ -499,6 +523,12 @@ def run_param_discovery(domain, endpoints, top_targets, paths, base_latency=5, a
     # 🌐 Scope filter — discard any endpoints not belonging to any scanned domain before processing
     effective_domains = all_domains if all_domains else [domain]
     endpoints = filter_urls_multi_domain(endpoints, effective_domains)
+    clean_eps = []
+    for ep in endpoints:
+        u = reconstruct_url(ep, default_domain=domain)
+        if u and is_valid_url(u):
+            clean_eps.append(u)
+    endpoints = unique_list(clean_eps)
 
     # 1. Passive Discovery
     url_params = extract_params_from_urls(endpoints)
@@ -559,7 +589,7 @@ def run_param_discovery(domain, endpoints, top_targets, paths, base_latency=5, a
     all_params = unique_list(filtered_params)
 
     # 6. Generate fuzzable endpoints using qsreplace
-    fuzzable_endpoints = generate_fuzzable_endpoints(endpoints, paths)
+    fuzzable_endpoints = generate_fuzzable_endpoints(endpoints, paths, default_domain=domain)
 
     # 7. Score per endpoint
     scored_targets = []

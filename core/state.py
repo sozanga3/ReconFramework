@@ -50,23 +50,28 @@ def load_tuple_from_file(filepath):
         return [], []
     
     from config.settings import EXCLUDED_EXTENSIONS
+    from core.utils import reconstruct_url, is_valid_url
     js_files = set()
     endpoints = set()
     
     with open(filepath, "r") as f:
         for line in f:
-            url = line.strip()
-            if not url:
+            raw_url = line.strip()
+            if not raw_url:
                 continue
             
-            # Global Exclusion Filter
-            if any(bad in url.lower() for bad in EXCLUDED_EXTENSIONS):
+            u = reconstruct_url(raw_url)
+            if not u or not is_valid_url(u):
                 continue
 
-            if url.endswith(".js") or ".js?" in url:
-                js_files.add(url)
+            # Global Exclusion Filter
+            if any(bad in u.lower() for bad in EXCLUDED_EXTENSIONS):
+                continue
+
+            if u.endswith(".js") or ".js?" in u:
+                js_files.add(u)
             else:
-                endpoints.add(url)
+                endpoints.add(u)
                 
     return list(js_files), list(endpoints)
 

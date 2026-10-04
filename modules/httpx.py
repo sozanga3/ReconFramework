@@ -3,7 +3,7 @@ import json
 from core.output import save_txt, save_json, debug_log
 from core.scoring import score_http_target
 from config.settings import HTTPX_RETRIES, HTTPX_THREADS, HTTPX_TIMEOUT, HTTPX_RATE_LIMIT
-from core.utils import get_tool_timeout
+from core.utils import get_tool_timeout, reconstruct_url, is_valid_url
 from config.tools import HTTPX
 from core.runner import run_command
 
@@ -82,8 +82,13 @@ def parse_httpx(file_path, paths, debug=False, suffix=""):
                     asn_val = data.get("asn", {})
                     asn_str = asn_val.get("as_number", "") if isinstance(asn_val, dict) else str(asn_val or "")
 
+                    raw_url = data.get("url")
+                    valid_url = reconstruct_url(raw_url)
+                    if not valid_url or not is_valid_url(valid_url):
+                        continue
+
                     record = {
-                        "url": data.get("url"),
+                        "url": valid_url,
                         "status_code": data.get("status_code"),
                         "content_length": data.get("content_length", 0),
                         "length": data.get("content_length", 0),
@@ -120,7 +125,7 @@ def parse_httpx(file_path, paths, debug=False, suffix=""):
     # ----------------------------
     # EXTRACT URLS
     # ----------------------------
-    alive_urls = [r["url"] for r in ranked if r.get("url")]
+    alive_urls = [r["url"] for r in ranked if r.get("url") and is_valid_url(r["url"])]
 
     save_txt(f"{paths['httpx']}/alive{suffix}.txt", alive_urls)
 

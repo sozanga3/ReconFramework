@@ -18,7 +18,16 @@ from core.output import (
     unique_list,
     generate_summary
 )
-from core.utils import get_dynamic_timeout, validate_tools, print_tools_status, is_valid_subdomain, clean_domain_input
+from core.utils import (
+    get_dynamic_timeout,
+    validate_tools,
+    print_tools_status,
+    is_valid_subdomain,
+    clean_domain_input,
+    reconstruct_url,
+    reconstruct_urls_list,
+    is_valid_url
+)
 from core.notifications import notify_scan_start, notify_vuln_found, notify_scan_complete
 from core.scoring import rank_targets
 from modules.screenshots import run_screenshots
@@ -284,7 +293,7 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
                 new_http = run_httpx(discovered_new, paths, suffix="_feedback", base_latency=dynamic_timeout, bypass_waf=bypass_waf, rate_limit=dynamic_rl)
                 http_results += new_http
                 save_json(f"{paths['httpx']}/results.json", http_results)
-                save_txt(f"{paths['httpx']}/alive.txt", [r["url"] for r in http_results if isinstance(r, dict) and r.get("url")])
+                save_txt(f"{paths['httpx']}/alive.txt", reconstruct_urls_list([r["url"] for r in http_results if isinstance(r, dict) and r.get("url")]))
                 
                 ranked = rank_targets(http_results)
                 save_json(f"{paths['httpx']}/ranked.json", ranked)
@@ -303,6 +312,9 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
                         
         save_state(paths, "feedback_loop")
 
+    clean_endpoints = reconstruct_urls_list(clean_endpoints, default_domain=domain, effective_domains=all_domains)
+    save_txt(f"{paths['endpoints']}/all_endpoints.txt", clean_endpoints)
+
     # ---------------------------------
     # PARAM DISCOVERY & API RECON (KR)
     # ---------------------------------
@@ -311,7 +323,7 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
         kr_routes = run_kiterunner(top_targets, paths, base_latency=dynamic_timeout, rate_limit=dynamic_rl)
         if kr_routes:
             endpoints = unique_list(endpoints + kr_routes)
-            clean_endpoints = unique_list(clean_endpoints + kr_routes)
+            clean_endpoints = reconstruct_urls_list(clean_endpoints + kr_routes, default_domain=domain, effective_domains=all_domains)
             save_txt(f"{paths['endpoints']}/all_endpoints.txt", clean_endpoints)
             
         all_params, scored_params = run_param_discovery(domain, clean_endpoints, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains)
@@ -344,19 +356,17 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
         raw_endpoints += fuzzable_eps
     
     for ep in raw_endpoints:
-        if ep.startswith("http"):
-            nuclei_targets.append(ep)
-        elif ep.startswith("/"):
-            for base in top_targets:
-                nuclei_targets.append(f"{base.rstrip('/')}/{ep.lstrip('/')}")
+        u = reconstruct_url(ep, default_domain=domain)
+        if u and is_valid_url(u):
+            nuclei_targets.append(u)
 
     if cloud_assets:
         for a in cloud_assets:
-            match = re.search(r'https?://[^\s]+', a)
-            if match:
-                nuclei_targets.append(match.group(0))
+            u = reconstruct_url(a, default_domain=domain)
+            if u and is_valid_url(u):
+                nuclei_targets.append(u)
 
-    nuclei_targets = unique_list(nuclei_targets)
+    nuclei_targets = reconstruct_urls_list(nuclei_targets, default_domain=domain)
 
     # Nuclei scan
     nuclei_results = []
@@ -372,7 +382,7 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
 
     # Screenshots (gowitness)
     if not resume or not is_step_completed(paths, "screenshots"):
-        all_urls = [r["url"] for r in ranked if isinstance(r, dict) and r.get("url")]
+        all_urls = reconstruct_urls_list([r["url"] for r in ranked if isinstance(r, dict) and r.get("url")])
         run_screenshots(all_urls, paths, debug=True)
         save_state(paths, "screenshots")
 

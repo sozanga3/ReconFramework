@@ -1,8 +1,9 @@
 import subprocess
 import os
-from core.output import debug_log
+from core.output import debug_log, save_txt
 from config.settings import GOWITNESS_THREADS
 from config.tools import GOWITNESS, is_tool_available
+from core.utils import reconstruct_urls_list
 
 
 # =========================================================
@@ -18,10 +19,12 @@ def run_screenshots(targets, paths, debug=False):
 
     targets_file = f"{output_dir}/targets.txt"
 
+    clean_targets = reconstruct_urls_list(targets)
+    if not clean_targets:
+        return
+
     # save targets
-    with open(targets_file, "w") as f:
-        for t in targets:
-            f.write(t + "\n")
+    save_txt(targets_file, clean_targets)
 
     try:
         json_file = f"{output_dir}/gowitness.jsonl"

@@ -5,7 +5,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qsl, urlunparse
 from core.output import save_txt, save_json, unique_list, filter_scope, debug_log, clean_data
-from core.utils import get_tool_timeout, is_valid_subdomain
+from core.utils import get_tool_timeout, is_valid_subdomain, reconstruct_url, is_valid_url
 from core.scoring import score_js
 from core.filter import filter_urls_multi_domain
 
@@ -212,7 +212,12 @@ def collect_urls(domain, targets, paths, base_latency=5):
             cwd=paths['js'],
             debug_path=debug_path
         )
-        getjs_urls = [u.strip() for u in getjs_urls if u.strip().startswith("http")]
+        clean_getjs = []
+        for u in getjs_urls:
+            valid_u = reconstruct_url(u, default_domain=domain)
+            if valid_u and is_valid_url(valid_u):
+                clean_getjs.append(valid_u)
+        getjs_urls = unique_list(clean_getjs)
     finally:
         if os.path.exists(tmp_targets):
             os.remove(tmp_targets)
@@ -359,7 +364,7 @@ def download_js_files(js_urls, download_path, base_latency=5, domain=None):
 # =========================================================
 # 🔗 ENDPOINT EXTRACTION (SMART)
 # =========================================================
-def extract_endpoints(download_path):
+def extract_endpoints(download_path, domain=None):
     print("[+] Extracting endpoints from downloaded JS (jsluice - BATCHED)")
     
     if not os.path.exists(download_path) or not os.listdir(download_path):
@@ -388,19 +393,15 @@ def extract_endpoints(download_path):
             if not line.strip(): continue
             try:
                 data = json.loads(line)
-                url = data.get("url")
+                raw_url = data.get("url")
                 source_path = data.get("filename", data.get("source", "unknown"))
                 
-                if url:
+                if raw_url:
                     origin_url = get_remote_url(source_path, mapping)
-                    if origin_url:
-                        # If url is relative, make it absolute using the origin host
-                        if not url.startswith("http"):
-                            base_host = get_base_url(origin_url)
-                            if url.startswith("/"):
-                                url = base_host + url
-                            else:
-                                url = base_host + "/" + url
+                    base_target = origin_url or (f"https://{domain}" if domain else None)
+                    url = reconstruct_url(raw_url, default_domain=base_target)
+                    if not url or not is_valid_url(url):
+                        continue
                     
                     if url not in endpoints_map:
                         endpoints_map[url] = []
@@ -586,13 +587,17 @@ def extract_js_intel(download_path, domain):
                     if api:
                         # Clean trailing brackets/colons if any captured accidentally
                         api = api.rstrip(':').rstrip('/')
-                        local_api.append(f"{base_host}{api}")
+                        api_u = reconstruct_url(api, default_domain=base_host)
+                        if api_u and is_valid_url(api_u):
+                            local_api.append(api_u)
 
                 # Extract frontend routing definitions
                 for route in route_pattern.findall(content):
                     route = route.strip()
-                    if route and route.startswith('/'):
-                        local_api.append(f"{base_host}{route}")
+                    if route:
+                        route_u = reconstruct_url(route, default_domain=base_host)
+                        if route_u and is_valid_url(route_u):
+                            local_api.append(route_u)
                 
         except:
             pass
@@ -651,14 +656,11 @@ def run_xnlinkfinder(domain, js_files, paths, base_latency=5):
                 for line in f:
                     ep = line.strip()
                     if ep:
-                        ep = reconstruct_corrupted_url(ep, domain)
-                        ep = normalize_and_clean_endpoint(ep)
-                        if not ep.startswith("http"):
-                            if ep.startswith("/"):
-                                ep = f"https://{domain}{ep}"
-                            else:
-                                ep = f"https://{domain}/{ep}"
-                        links.append(ep)
+                        u = reconstruct_url(ep, default_domain=domain)
+                        if u and is_valid_url(u):
+                            links.append(u)
+            links = unique_list(links)
+            save_txt(out_file, links)
 
         if os.path.exists(param_file):
             with open(param_file, 'r') as f:
@@ -667,7 +669,7 @@ def run_xnlinkfinder(domain, js_files, paths, base_latency=5):
                     if p and not p.startswith("#"):
                         params.append(p)
 
-        return unique_list(links), unique_list(params)
+        return links, unique_list(params)
     except Exception as e:
         print(f"[-] Error in xnLinkFinder: {e}")
         return [], []
@@ -789,7 +791,11 @@ def run_jsleak(js_urls, paths, base_latency=5):
             link_match = re.search(r"\[\+\] Found link:\s*\[(.*?)\]\s*in\s*\[(.*?)\]", line, re.IGNORECASE)
             if link_match:
                 extracted = link_match.group(1).strip()
-                if extracted: found_links.append(extracted)
+                src_url = link_match.group(2).strip()
+                if extracted:
+                    u = reconstruct_url(extracted, default_domain=src_url)
+                    if u and is_valid_url(u):
+                        found_links.append(u)
                 continue
                 
             secret_match = re.search(r"\[\+\] Found (?:Secret|secret):\s*\[(.*?)\]\s*in\s*\[(.*?)\]", line, re.IGNORECASE)
@@ -852,7 +858,10 @@ def run_subdomainizer(domain, js_urls, paths, base_latency=5):
             with open(out_cloud_file, "r") as f:
                 for line in f:
                     s = line.strip()
-                    if s: out_cloud.append(s)
+                    if s:
+                        u = reconstruct_url(s)
+                        if u and is_valid_url(u):
+                            out_cloud.append(u)
     except Exception as e:
         print(f"[-] Error in SubDomainizer: {e}")
     finally:
@@ -991,7 +1000,7 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
     download_path = f"{paths['js']}/downloads"
     js_subdomains_from_urls = download_js_files(download_targets, download_path, base_latency=base_latency, domain=domain)
     
-    endpoints, endpoints_map = extract_endpoints(download_path)
+    endpoints, endpoints_map = extract_endpoints(download_path, domain=domain)
     secrets, secrets_map = detect_secrets(download_path)
     
     # NEW: Deep Intel Extraction
@@ -1029,7 +1038,7 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
 
     # Filter endpoints to keep clean and in-scope before probing
     from modules.js_filter import filter_endpoints
-    clean_endpoints_for_probing = filter_endpoints(endpoints, domain)
+    clean_endpoints_for_probing = filter_endpoints(endpoints, domain, all_domains=all_domains)
 
     # 7. Probe filtered discovered endpoints
     probed_results = probe_endpoints(clean_endpoints_for_probing, domain, paths, base_latency=base_latency)

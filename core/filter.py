@@ -1,4 +1,4 @@
-from core.utils import is_valid_subdomain
+from core.utils import is_valid_subdomain, reconstruct_url, is_valid_url
 from urllib.parse import urlparse
 
 BAD_THIRD_PARTY_DOMAINS = [
@@ -32,11 +32,17 @@ BAD_THIRD_PARTY_DOMAINS = [
 def filter_urls(urls, domain):
     clean = []
     for u in urls:
-        if not is_valid_subdomain(u, domain):
+        if not u:
             continue
-        host = _url_host(u)
+        # Reconstruct into full URL format
+        valid_u = reconstruct_url(u, default_domain=domain)
+        if not valid_u or not is_valid_url(valid_u):
+            continue
+        if not is_valid_subdomain(valid_u, domain):
+            continue
+        host = _url_host(valid_u)
         if not any(bad in host for bad in BAD_THIRD_PARTY_DOMAINS):
-            clean.append(u)
+            clean.append(valid_u)
     return list(set(clean))
 
 
@@ -48,6 +54,9 @@ def _url_host(url):
     if "://" in u:
         try:
             host = urlparse(u).netloc or ""
+            # Strip credentials if any
+            if "@" in host:
+                host = host.split("@")[-1]
             # Strip port if present
             return host.split(":")[0].lower()
         except Exception:
@@ -58,41 +67,40 @@ def _url_host(url):
 
 def filter_urls_multi_domain(urls, domains):
     """Return only URLs whose host belongs to one of the supplied domains
-    (exact match or any subdomain level).
+    (exact match or any subdomain level), reconstructed into valid URL format.
 
     Args:
         urls (list[str]): Raw URL / hostname strings to filter.
         domains (list[str]): Authoritative domains to keep (e.g. ['example.com', 'target.org']).
 
     Returns:
-        list[str]: De-duplicated list of in-scope URLs preserving insertion order.
+        list[str]: De-duplicated list of in-scope, well-formed URLs preserving insertion order.
     """
-    if not domains:
-        return list(urls)
+    if not urls:
+        return []
 
     # Normalise domain list once
-    norm_domains = [d.strip().lower().lstrip(".") for d in domains if d and d.strip()]
-    if not norm_domains:
-        return list(urls)
+    norm_domains = [d.strip().lower().lstrip(".") for d in domains if d and d.strip()] if domains else []
+    default_target = norm_domains[0] if norm_domains else None
 
     seen = set()
     result = []
     for u in urls:
         if not u:
             continue
-        host = _url_host(u)
+        # Reconstruct any partial URL or relative path into full valid URL
+        valid_u = reconstruct_url(u, default_domain=default_target)
+        if not valid_u or not is_valid_url(valid_u):
+            continue
+
+        host = _url_host(valid_u)
         if not host:
-            # Relative paths (/api/...) are always kept
-            if u.startswith("/"):
-                if u not in seen:
-                    seen.add(u)
-                    result.append(u)
             continue
         if any(bad in host for bad in BAD_THIRD_PARTY_DOMAINS):
             continue
             
-        if any(is_valid_subdomain(host, d) for d in norm_domains):
-            if u not in seen:
-                seen.add(u)
-                result.append(u)
+        if not norm_domains or any(is_valid_subdomain(host, d) for d in norm_domains):
+            if valid_u not in seen:
+                seen.add(valid_u)
+                result.append(valid_u)
     return result

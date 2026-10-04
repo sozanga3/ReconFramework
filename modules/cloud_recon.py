@@ -1,7 +1,7 @@
 import requests
 import concurrent.futures
 from core.output import save_txt, unique_list, debug_log
-from core.utils import get_tool_timeout
+from core.utils import get_tool_timeout, reconstruct_url, is_valid_url
 
 # =========================================================
 # ☁️ CLOUD RECON MODULE (S3 / AZURE / GCP / DIGITALOCEAN)
@@ -10,18 +10,17 @@ from core.utils import get_tool_timeout
 def check_bucket(platform_name, url, timeout=5):
     """
     Checks if a cloud bucket exists and is public.
-    Returns formatted result string or None.
+    Returns dict with status, platform, and url or None.
     """
     try:
         r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
         # 200 OK -> Likely public and listable
         if r.status_code == 200:
-            if "ListBucketResult" in r.text or "BlobList" in r.text or "<Contents>" in r.text:
-                return f"[PUBLIC] {platform_name}: {url}"
-            return f"[ALIVE] {platform_name}: {url}"
+            status = "PUBLIC" if ("ListBucketResult" in r.text or "BlobList" in r.text or "<Contents>" in r.text) else "ALIVE"
+            return {"status": status, "platform": platform_name, "url": url}
         # 403 Forbidden -> Exists but protected
         elif r.status_code == 403:
-            return f"[PROTECTED] {platform_name}: {url}"
+            return {"status": "PROTECTED", "platform": platform_name, "url": url}
         return None
     except Exception:
         return None
@@ -76,16 +75,35 @@ def run_cloud_recon(domain, paths, base_latency=5):
         for future in concurrent.futures.as_completed(future_to_target):
             res = future.result()
             if res:
-                print(f"    ⭐ {res}")
+                print(f"    ⭐ [{res['status']}] {res['platform']}: {res['url']}")
                 results.append(res)
 
-    results = unique_list(results)
-    cloud_dir = paths.get('cloud', paths['base'])
-    save_txt(f"{cloud_dir}/cloud_assets.txt", results)
+    # Sort and extract pure URLs
+    cloud_urls = []
+    report_lines = []
+    for r in results:
+        u = reconstruct_url(r["url"])
+        if u and is_valid_url(u):
+            cloud_urls.append(u)
+            report_lines.append(f"[{r['status']}] {r['platform']}: {u}")
 
-    if results:
-        print(f"[+] Cloud Recon complete. Found {len(results)} assets.")
+    cloud_urls = unique_list(cloud_urls)
+    report_lines = unique_list(report_lines)
+
+    cloud_dir = paths.get('cloud', paths['base'])
+    save_txt(f"{cloud_dir}/cloud_assets.txt", cloud_urls)
+
+    with open(f"{cloud_dir}/cloud_report.txt", "w") as f:
+        f.write(f"☁️ CLOUD RECON REPORT: {domain}\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"📂 Cloud Assets Discovered: {len(cloud_urls)}\n")
+        f.write("-" * 60 + "\n")
+        for line in report_lines:
+            f.write(f"• {line}\n")
+
+    if cloud_urls:
+        print(f"[+] Cloud Recon complete. Found {len(cloud_urls)} assets.")
     else:
         print("[-] No cloud assets found.")
 
-    return results
+    return cloud_urls

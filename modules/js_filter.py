@@ -1,7 +1,7 @@
 import re
 from core.output import save_txt, save_json, unique_list
 from core.scoring import keyword_score
-from core.utils import is_valid_subdomain
+from core.utils import is_valid_subdomain, reconstruct_url, is_valid_url
 from config.settings import EXCLUDED_EXTENSIONS
 from config.keywords import KEYWORDS
 
@@ -99,30 +99,40 @@ RISK_KEYWORDS = {
 def filter_js_files(js_files, domain=None, all_domains=None):
     """
     Filters JS file URLs removing vendor garbage, enforcing scope, and categorizing high value scripts.
+    Guarantees that all returned JS files are valid URLs.
     """
     clean = []
     high_value = []
     effective_domains = all_domains if all_domains else ([domain] if domain else [])
+    default_target = effective_domains[0] if effective_domains else (domain or None)
 
     for js in js_files:
         if not js:
             continue
-        js_lower = js.lower().strip()
-
-        # Remove known vendor garbage
-        if any(bad in js_lower for bad in BAD_JS_PATTERNS):
+        
+        # Reconstruct into full URL format
+        url = reconstruct_url(js, default_domain=default_target)
+        if not url or not is_valid_url(url):
             continue
 
-        # If effective_domains is set, ensure external js belongs to in-scope domains
-        if effective_domains and not js.startswith("/"):
-            if not any(is_valid_subdomain(js, d) for d in effective_domains):
+        url_lower = url.lower()
+
+        # Remove known vendor garbage
+        if any(bad in url_lower for bad in BAD_JS_PATTERNS):
+            continue
+
+        # Ensure external js belongs to in-scope domains
+        if effective_domains:
+            if not any(is_valid_subdomain(url, d) for d in effective_domains):
                 continue
+        elif domain and not is_valid_subdomain(url, domain):
+            continue
 
         # Classify high interest
-        if keyword_score(js) >= 4:
-            high_value.append(js)
+        if keyword_score(url) >= 4:
+            high_value.append(url)
 
-        clean.append(js)
+        clean.append(url)
 
     return unique_list(clean), unique_list(high_value)
 
@@ -133,24 +143,7 @@ def filter_js_files(js_files, domain=None, all_domains=None):
 def reconstruct_corrupted_url(url, domain):
     if not url:
         return url
-    url_lower = url.lower()
-    
-    if "xn_params.txt" in url_lower:
-        idx = url_lower.find("xn_params.txt")
-        rel_path = url[idx + len("xn_params.txt"):]
-        if not rel_path.startswith("/"):
-            rel_path = "/" + rel_path
-        return f"https://{domain}{rel_path}"
-        
-    elif url_lower.startswith("http:///home/") or url_lower.startswith(":////home/"):
-        if domain in url_lower:
-            idx = url_lower.find(domain)
-            rel_path = url[idx + len(domain):]
-            if not rel_path.startswith("/"):
-                rel_path = "/" + rel_path
-            return f"https://{domain}{rel_path}"
-            
-    return url
+    return reconstruct_url(url, default_domain=domain)
 
 
 # =========================================================
@@ -175,21 +168,12 @@ def strip_junk_query_params(url):
 # =========================================================
 # 🔗 NORMALIZE AND CLEAN ENDPOINT
 # =========================================================
-def normalize_and_clean_endpoint(ep):
+def normalize_and_clean_endpoint(ep, domain=None):
     if not ep:
         return ep
     
     ep = strip_junk_query_params(ep)
-    
-    while "/./" in ep:
-        ep = ep.replace("/./", "/")
-        
-    if ep.startswith("https://"):
-        ep = "https://" + ep[8:].replace("//", "/")
-    elif ep.startswith("http://"):
-        ep = "http://" + ep[7:].replace("//", "/")
-        
-    return ep
+    return reconstruct_url(ep, default_domain=domain)
 
 
 # =========================================================
@@ -199,6 +183,7 @@ def filter_endpoints(endpoints, domain, all_domains=None):
     clean = []
     local_prefixes = ["/home/", "/tmp/", "/var/", "/etc/", "/opt/", "/usr/", "/bin/", "/lib/", "/sys/", "/proc/", "/dev/", "/root/"]
     effective_domains = all_domains if all_domains else ([domain] if domain else [])
+    default_target = effective_domains[0] if effective_domains else (domain or None)
 
     junk_substrings = [
         "/undefined", "undefined.js", "/null/", "/null", "null.js", 
@@ -219,35 +204,41 @@ def filter_endpoints(endpoints, domain, all_domains=None):
     for ep in endpoints:
         if not ep:
             continue
-        ep_lower = ep.lower().strip()
+        raw_lower = ep.lower().strip()
 
-        # remove garbage extensions
-        if any(bad in ep_lower for bad in EXCLUDED_EXTENSIONS):
+        # Filter local filesystem junk paths
+        if any(raw_lower.startswith(pref) for pref in local_prefixes):
+            continue
+        if any(f"/{pref.strip('/')}/" in raw_lower for pref in local_prefixes):
+            continue
+
+        # Remove garbage extensions
+        if any(bad in raw_lower for bad in EXCLUDED_EXTENSIONS):
             continue
 
         # Exclude .js files from endpoints output
-        if ep_lower.endswith(".js") or ".js?" in ep_lower:
+        if raw_lower.endswith(".js") or ".js?" in raw_lower:
             continue
 
-        if any(junk in ep_lower for junk in junk_substrings):
+        if any(junk in raw_lower for junk in junk_substrings):
             continue
 
-        if any(sj in ep_lower for sj in static_junk):
+        if any(sj in raw_lower for sj in static_junk):
             continue
 
-        if "xn_params.txt" in ep_lower or ":////home/" in ep_lower or ":///home/" in ep_lower:
-            ep = reconstruct_corrupted_url(ep, domain)
-            
-        ep = normalize_and_clean_endpoint(ep)
-        ep_lower = ep.lower()
+        # Reconstruct into full URL format
+        url = reconstruct_url(ep, default_domain=default_target)
+        if not url or not is_valid_url(url):
+            continue
 
-        in_scope = ep.startswith("/") or (any(is_valid_subdomain(ep, d) for d in effective_domains) if effective_domains else is_valid_subdomain(ep, domain))
+        url_lower = url.lower()
+        if any(junk in url_lower for junk in junk_substrings):
+            continue
+
+        # Scope validation
+        in_scope = any(is_valid_subdomain(url, d) for d in effective_domains) if effective_domains else is_valid_subdomain(url, domain)
         if in_scope:
-            if ep.startswith("/") and any(ep_lower.startswith(pref) for pref in local_prefixes):
-                continue
-            if any(f"/{pref.strip('/')}/" in ep_lower for pref in local_prefixes):
-                continue
-            clean.append(ep)
+            clean.append(url)
 
     return unique_list(clean)
 

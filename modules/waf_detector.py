@@ -3,7 +3,7 @@ import re
 from config.tools import WAFW00F, NOMORE403, is_tool_available
 from config.wordlists import NOMORE403_PAYLOADS
 from core.output import save_txt, unique_list
-from core.utils import get_tool_timeout
+from core.utils import get_tool_timeout, reconstruct_url, is_valid_url
 from core.runner import run_command
 
 # Standard WAF bypass injection headers
@@ -29,9 +29,13 @@ def detect_waf(url):
     if not is_tool_available(WAFW00F):
         return None
 
-    print(f"[?] Checking for WAF on {url}")
+    target_url = reconstruct_url(url)
+    if not target_url or not is_valid_url(target_url):
+        return None
+
+    print(f"[?] Checking for WAF on {target_url}")
     try:
-        cmd = [WAFW00F, "--no-colors", "-a", url]
+        cmd = [WAFW00F, "--no-colors", "-a", target_url]
         res_lines = run_command(cmd, timeout=45)
         output = "\n".join(res_lines)
         
@@ -93,6 +97,7 @@ def get_safety_profile(targets, limit=5):
 def run_nomore403(endpoints_403, paths, base_latency=5):
     """
     Runs nomore403 on endpoints returning 403 status code to attempt bypass.
+    Outputs strictly valid URLs to bypassed_403.txt.
     """
     if not endpoints_403:
         return []
@@ -103,26 +108,39 @@ def run_nomore403(endpoints_403, paths, base_latency=5):
         
     print(f"\n[+] Running 403 Bypass Testing (nomore403) on {len(endpoints_403)} target(s)...")
     med_timeout = get_tool_timeout(base_latency, "medium")
-    bypassed = []
+    bypassed_urls = []
+    bypassed_reports = []
     
     for ep in endpoints_403[:15]:
+        target_ep = reconstruct_url(ep)
+        if not target_ep or not is_valid_url(target_ep):
+            continue
         try:
-            cmd = [NOMORE403, "-u", ep, "--no-banner"]
+            cmd = [NOMORE403, "-u", target_ep, "--no-banner"]
             if os.path.exists(NOMORE403_PAYLOADS):
                 cmd.extend(["-f", NOMORE403_PAYLOADS])
             lines = run_command(cmd, timeout=med_timeout, cwd=paths['endpoints'])
             for l in lines:
                 l_str = l.strip()
                 if "200 OK" in l_str or "302 Found" in l_str or "301 Moved" in l_str:
-                    bypassed.append(f"[BYPASS SUCCESS] {ep} -> {l_str}")
+                    bypassed_urls.append(target_ep)
+                    bypassed_reports.append(f"[BYPASS SUCCESS] {target_ep} -> {l_str}")
         except Exception:
             pass
             
-    if bypassed:
+    bypassed_urls = unique_list(bypassed_urls)
+    bypassed_reports = unique_list(bypassed_reports)
+
+    if bypassed_urls:
         fuzz_403_dir = paths.get('fuzzing_403', paths['fuzzing'])
-        save_txt(f"{fuzz_403_dir}/bypassed_403.txt", bypassed)
-        print(f"[!] Successfully bypassed 403 restrictions on {len(bypassed)} endpoint(s)!")
+        save_txt(f"{fuzz_403_dir}/bypassed_403.txt", bypassed_urls)
+        with open(f"{fuzz_403_dir}/bypassed_403_report.txt", "w") as f:
+            f.write(f"🔓 403 BYPASS REPORT\n")
+            f.write("=" * 60 + "\n\n")
+            for rep in bypassed_reports:
+                f.write(f"{rep}\n")
+        print(f"[!] Successfully bypassed 403 restrictions on {len(bypassed_urls)} endpoint(s)!")
     else:
         print("[*] No 403 bypasses achieved.")
         
-    return bypassed
+    return bypassed_urls

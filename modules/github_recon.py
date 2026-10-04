@@ -4,7 +4,7 @@ from core.output import save_txt, unique_list, debug_log
 from config.api_keys import GITHUB_TOKEN
 from config.tools import GITHUB_SUBDOMAINS, GITHUB_ENDPOINTS, GITHUB_SECRETS, is_tool_available
 from core.runner import run_command, run_command_shell
-from core.utils import is_valid_subdomain
+from core.utils import is_valid_subdomain, reconstruct_url, is_valid_url
 
 # =========================================================
 # 🐙 GITHUB RECON MODULE (DEEP DISCOVERY)
@@ -55,9 +55,9 @@ def github_endpoints(domain, paths):
         line_s = line.strip()
         if not line_s or "RequestsDependencyWarning" in line_s or line_s.startswith("[-]"):
             continue
-        if line_s.startswith("http://") or line_s.startswith("https://"):
-            if is_valid_subdomain(line_s, domain):
-                cleaned.append(line_s)
+        u = reconstruct_url(line_s, default_domain=domain)
+        if u and is_valid_url(u) and is_valid_subdomain(u, domain):
+            cleaned.append(u)
             
     cleaned = unique_list(cleaned)
     save_txt(f"{paths['js']}/github_endpoints.txt", cleaned)

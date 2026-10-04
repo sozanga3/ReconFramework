@@ -12,7 +12,7 @@ from config.settings import (
 from config.tools import (
     KATANA, HAKRAWLER, GAU, WAYBACKURLS, GOSPIDER, WAYMORE, URLFINDER, is_tool_available
 )
-from core.utils import get_tool_timeout
+from core.utils import get_tool_timeout, reconstruct_url, is_valid_url
 from core.output import save_txt, unique_list, debug_log
 from core.runner import run_command, run_command_with_input
 from core.filter import filter_urls_multi_domain
@@ -42,12 +42,18 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all
     
     js_files = set()
     endpoints = set()
+    default_target = targets[0] if targets else (all_domains[0] if all_domains else None)
     
     if os.path.exists(output_file):
         with open(output_file, 'r') as f:
             for line in f:
-                url = line.strip()
-                if not url:
+                raw_url = line.strip()
+                if not raw_url:
+                    continue
+                
+                # Reconstruct full URL if relative or partial
+                url = reconstruct_url(raw_url, default_domain=default_target)
+                if not url or not is_valid_url(url):
                     continue
                 
                 # Global Exclusion Filter
@@ -70,6 +76,9 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all
                     
     print(f"[+] Katana found {len(js_files)} JS files and {len(endpoints)} active endpoints")
     
+    # Save clean, reconstructed URLs directly to raw output file
+    save_txt(output_file, unique_list(list(js_files | endpoints)))
+
     # 📝 SAVE HUMAN-READABLE REPORT
     with open(f"{ep_raw_dir}/katana_report.txt", "w") as f:
         f.write(f"🕷️ KATANA CRAWL REPORT\n")
@@ -98,26 +107,29 @@ def run_hakrawler(targets, paths, debug=False, base_latency=5, all_domains=None)
     input_data = "\n".join(targets) + "\n"
     cmd = [HAKRAWLER, "-d", str(HAKRAWLER_DEPTH), "-t", str(HAKRAWLER_THREADS), "-u"]
     lines = run_command_with_input(cmd, input_data, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=ep_raw_dir)
-    save_txt(output_file, lines)
     
+    default_target = targets[0] if targets else (all_domains[0] if all_domains else None)
     js_files = set()
     endpoints = set()
     
-    if os.path.exists(output_file):
-        with open(output_file, 'r') as f:
-            for line in f:
-                url = line.strip()
-                if not url:
-                    continue
-                
-                # Global Exclusion Filter
-                if any(bad in url.lower() for bad in EXCLUDED_EXTENSIONS):
-                    continue
+    for line in lines:
+        raw_url = line.strip()
+        if not raw_url:
+            continue
+        
+        # Reconstruct into full URL format
+        url = reconstruct_url(raw_url, default_domain=default_target)
+        if not url or not is_valid_url(url):
+            continue
+        
+        # Global Exclusion Filter
+        if any(bad in url.lower() for bad in EXCLUDED_EXTENSIONS):
+            continue
 
-                if url.endswith(".js") or ".js?" in url:
-                    js_files.add(url)
-                else:
-                    endpoints.add(url)
+        if url.endswith(".js") or ".js?" in url:
+            js_files.add(url)
+        else:
+            endpoints.add(url)
 
     # 🌐 Scope filter — drop URLs not belonging to any scanned domain
     effective_domains = all_domains
@@ -130,6 +142,9 @@ def run_hakrawler(targets, paths, debug=False, base_latency=5, all_domains=None)
                     
     print(f"[+] Hakrawler found {len(js_files)} JS files and {len(endpoints)} active endpoints")
     
+    # Save clean, reconstructed URLs directly to raw output file
+    save_txt(output_file, unique_list(list(js_files | endpoints)))
+
     # 📝 SAVE HUMAN-READABLE REPORT
     with open(f"{ep_raw_dir}/hakrawler_report.txt", "w") as f:
         f.write(f"🕷️ HAKRAWLER CRAWL REPORT\n")
@@ -183,10 +198,15 @@ def _run_gau(domain, paths, base_latency=5, effective_domains=None):
         "--blacklist", "png,jpg,gif,css,woff,svg",
         domain
     ]
-    lines = run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
-    lines = [l for l in lines if l.startswith("http")]
+    raw_lines = run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
+    lines = []
+    for l in raw_lines:
+        u = reconstruct_url(l, default_domain=domain)
+        if u and is_valid_url(u):
+            lines.append(u)
     if effective_domains:
         lines = filter_urls_multi_domain(lines, effective_domains)
+    lines = unique_list(lines)
     save_txt(output_file, lines)
     print(f"  [gau]          {len(lines)} URLs")
     return lines
@@ -211,10 +231,15 @@ def _run_waybackurls(domain, paths, base_latency=5, effective_domains=None):
     # Give waybackurls enough time to complete its queries.
     timeout = max(120, get_tool_timeout(base_latency, "deep"))
     cmd = [WAYBACKURLS]
-    lines = run_command_with_input(cmd, f"{domain}\n", timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
-    lines = [l for l in lines if l.startswith("http")]
+    raw_lines = run_command_with_input(cmd, f"{domain}\n", timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
+    lines = []
+    for l in raw_lines:
+        u = reconstruct_url(l, default_domain=domain)
+        if u and is_valid_url(u):
+            lines.append(u)
     if effective_domains:
         lines = filter_urls_multi_domain(lines, effective_domains)
+    lines = unique_list(lines)
     save_txt(output_file, lines)
     print(f"  [waybackurls]  {len(lines)} URLs")
     return lines
@@ -231,19 +256,29 @@ def _run_gospider(targets, paths, base_latency=5, effective_domains=None):
     capped = targets
     save_txt(input_file, capped)
 
+    default_target = targets[0] if targets else (effective_domains[0] if effective_domains else None)
     timeout = get_tool_timeout(base_latency, "heavy", item_count=len(capped))
     cmd = [GOSPIDER, "-S", input_file, "-d", str(GOSPIDER_DEPTH), "-t", str(GOSPIDER_THREADS), "-m", "15"]
     raw_lines = run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
 
-    # gospider output can be "[url] - https://..." or plain URLs — extract with regex
     all_urls = []
     for line in raw_lines:
         found = re.findall(r'https?://[^\s\]"\'>]+', line)
-        all_urls.extend(found)
+        if found:
+            for f_url in found:
+                u = reconstruct_url(f_url, default_domain=default_target)
+                if u and is_valid_url(u):
+                    all_urls.append(u)
+        else:
+            # If line is a URL without scheme or brackets
+            u = reconstruct_url(line, default_domain=default_target)
+            if u and is_valid_url(u):
+                all_urls.append(u)
 
     if effective_domains:
         all_urls = filter_urls_multi_domain(all_urls, effective_domains)
 
+    all_urls = unique_list(all_urls)
     save_txt(output_file, all_urls)
     print(f"  [gospider]     {len(all_urls)} URLs")
     return all_urls
@@ -260,9 +295,13 @@ def _run_waymore(domain, paths, base_latency=5, effective_domains=None):
     lines = []
     if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
         with open(output_file, "r") as f:
-            lines = [l.strip() for l in f if l.strip().startswith("http")]
+            for l in f:
+                u = reconstruct_url(l, default_domain=domain)
+                if u and is_valid_url(u):
+                    lines.append(u)
         if effective_domains:
             lines = filter_urls_multi_domain(lines, effective_domains)
+        lines = unique_list(lines)
         save_txt(output_file, lines)
     print(f"  [waymore]      {len(lines)} URLs")
     return lines
@@ -275,10 +314,15 @@ def _run_urlfinder(domain, paths, base_latency=5, effective_domains=None):
     output_file = f"{paths['endpoints']}/urlfinder_raw.txt"
     timeout = get_tool_timeout(base_latency, "deep")
     cmd = [URLFINDER, "-d", domain, "-silent"]
-    lines = run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
-    lines = [l.strip() for l in lines if l.strip().startswith("http")]
+    raw_lines = run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
+    lines = []
+    for l in raw_lines:
+        u = reconstruct_url(l, default_domain=domain)
+        if u and is_valid_url(u):
+            lines.append(u)
     if effective_domains:
         lines = filter_urls_multi_domain(lines, effective_domains)
+    lines = unique_list(lines)
     save_txt(output_file, lines)
     print(f"  [urlfinder]    {len(lines)} URLs")
     return lines
@@ -287,7 +331,7 @@ def _run_urlfinder(domain, paths, base_latency=5, effective_domains=None):
 def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None):
     """
     Orchestrate gau, waybackurls, gospider, waymore, and urlfinder in parallel.
-    Returns (js_files, endpoints) deduplicated and filtered.
+    Returns (js_files, endpoints) deduplicated and filtered as valid URLs.
     """
     print("\n[+] Passive URL Collection (gau | waybackurls | gospider | waymore | urlfinder)")
 
@@ -316,8 +360,9 @@ def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None)
     js_files  = set()
     endpoints = set()
 
-    for url in all_raw:
-        if not url.startswith("http"):
+    for item in all_raw:
+        url = reconstruct_url(item, default_domain=domain)
+        if not url or not is_valid_url(url):
             continue
         # Global exclusion filter
         if any(bad in url.lower() for bad in EXCLUDED_EXTENSIONS):
@@ -329,9 +374,9 @@ def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None)
 
     # ── Save outputs ──────────────────────────────────────────
     ep_raw_dir = paths.get('endpoints_raw', paths['endpoints'])
-    save_txt(f"{ep_raw_dir}/passive_urls.txt",      list(js_files | endpoints))
-    save_txt(f"{ep_raw_dir}/passive_endpoints.txt", list(endpoints))
-    save_txt(f"{ep_raw_dir}/passive_js.txt",        list(js_files))
+    save_txt(f"{ep_raw_dir}/passive_urls.txt",      unique_list(list(js_files | endpoints)))
+    save_txt(f"{ep_raw_dir}/passive_endpoints.txt", unique_list(list(endpoints)))
+    save_txt(f"{ep_raw_dir}/passive_js.txt",        unique_list(list(js_files)))
 
     # ── Human-readable report ─────────────────────────────────
     with open(f"{ep_raw_dir}/passive_url_report.txt", "w") as f:
