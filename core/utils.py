@@ -180,6 +180,12 @@ def is_valid_url(url: str) -> bool:
     u = url.strip()
     if not (u.startswith("http://") or u.startswith("https://")):
         return False
+    # Disallow raw whitespace or unescaped backslashes in URL
+    if any(c in u for c in (" ", "\t", "\r", "\n", "\\")):
+        return False
+    # Disallow ASCII art / banner artifacts
+    if any(bad in u.lower() for bad in ("<3", "@0x", "._/", "/_/", ".__/", "\\___/", "paramspider", "devansh")):
+        return False
     try:
         parsed = urlparse(u)
         if parsed.scheme not in ("http", "https"):
@@ -214,6 +220,10 @@ def reconstruct_url(raw_item: str, default_domain: str = None, default_scheme: s
 
     item = raw_item.strip().strip("\"'<>`()[],;").strip()
     if not item:
+        return ""
+
+    # Reject early if item contains tool ASCII banner or credit artifacts
+    if any(bad in item.lower() for bad in ("<3", "@0x", "._/", "/_/", ".__/", "\\___/", "paramspider", "devansh")):
         return ""
 
     # Extract URL if embedded in tool log text (e.g. "[PUBLIC] AWS S3: https://...", "-> https://...", "Found link: [http://...]")
@@ -358,6 +368,9 @@ def reconstruct_url(raw_item: str, default_domain: str = None, default_scheme: s
 
     # If not a domain, treat as a relative path
     if base_host:
+        # Reject items that contain raw whitespace, backslashes, author tags, or brackets
+        if any(c in item for c in (" ", "\t", "\r", "\n", "\\", "<", ">", "@", "`", "^", "|")):
+            return ""
         q_split = item.split("?", 1)
         path_part = q_split[0]
         q_part = ("?" + q_split[1]) if len(q_split) > 1 else ""
@@ -366,6 +379,38 @@ def reconstruct_url(raw_item: str, default_domain: str = None, default_scheme: s
         return f"{base_scheme}://{base_host}{path_part}{q_part}"
 
     return ""
+
+def canonicalize_url_schemes(urls):
+    """
+    If the exact same target (host:port, path, query) is present under both http:// and https://,
+    prefers https:// and drops the redundant http:// duplicate.
+    Preserves original order of appearance.
+    """
+    if not urls:
+        return []
+    targets_with_https = set()
+    for u in urls:
+        if u.startswith("https://"):
+            try:
+                p = urlparse(u)
+                targets_with_https.add((p.netloc.lower(), p.path, p.query))
+            except Exception:
+                pass
+    result = []
+    seen = set()
+    for u in urls:
+        if u in seen:
+            continue
+        if u.startswith("http://"):
+            try:
+                p = urlparse(u)
+                if (p.netloc.lower(), p.path, p.query) in targets_with_https:
+                    continue
+            except Exception:
+                pass
+        seen.add(u)
+        result.append(u)
+    return result
 
 def reconstruct_urls_list(items, default_domain=None, default_scheme="https", effective_domains=None):
     """
@@ -402,7 +447,7 @@ def reconstruct_urls_list(items, default_domain=None, default_scheme="https", ef
         if url not in seen:
             seen.add(url)
             result.append(url)
-    return result
+    return canonicalize_url_schemes(result)
 
 
 def strip_tracking_parameters(url, extra_noise=None):

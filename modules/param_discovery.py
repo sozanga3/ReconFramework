@@ -254,6 +254,11 @@ def run_paramspider(domain, paths, base_latency=5, all_domains=None):
             line = line.strip()
             if not line:
                 continue
+            # Filter out ParamSpider banner, ASCII art, and author credits
+            if any(b in line.lower() for b in ["paramspider", "devansh", "0xasm0d3us", "github.com", "<3"]):
+                continue
+            if not ("http://" in line or "https://" in line or "?" in line):
+                continue
             u = reconstruct_url(line, default_domain=domain)
             if u and is_valid_url(u) and any(is_valid_subdomain(u, d) for d in effective_domains):
                 found_urls.append(u)
@@ -265,6 +270,10 @@ def run_paramspider(domain, paths, base_latency=5, all_domains=None):
                 for line in f:
                     line = line.strip()
                     if not line:
+                        continue
+                    if any(b in line.lower() for b in ["paramspider", "devansh", "0xasm0d3us", "github.com", "<3"]):
+                        continue
+                    if not ("http://" in line or "https://" in line or "?" in line):
                         continue
                     u = reconstruct_url(line, default_domain=domain)
                     if u and is_valid_url(u) and any(is_valid_subdomain(u, d) for d in effective_domains):

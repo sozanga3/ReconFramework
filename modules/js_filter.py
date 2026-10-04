@@ -177,9 +177,19 @@ def filter_endpoints(endpoints, domain, all_domains=None):
     default_target = effective_domains[0] if effective_domains else (domain or None)
 
     junk_substrings = [
-        "/undefined", "undefined.js", "/null/", "/null", "null.js", 
+        "/undefined", "undefined.js", "/null/", "/null", "null.js", "/nan/", "/nan",
         "javascript:void", "javascript:false", "javascript:true",
-        "shockwaveflash", "activexobject", "msxml2.xmlhttp"
+        "shockwaveflash", "activexobject", "msxml2.xmlhttp",
+        "/tel:", "/mailto:", "tel:+", "mailto:",
+        # Concatenation and quote fragments from JS string parsing
+        "%27", "%22", "'+", "' +", "+'", "+ '", "+%20", "%20+", "%2b%2b", "+++",
+        # Template literal interpolations
+        "${", "#{", "%24%7b", "%23%7b", "%7b%7b",
+        # JS runtime properties, objects, and DOM methods
+        "this.", "this%2e", "window.", "document.", "$content", "jquery",
+        ".attr(", ".val(", ".text(", ".html(",
+        # Regex / replacement artifacts
+        "\\d+", "%241", "$1",
     ]
 
     static_junk = [
@@ -231,7 +241,8 @@ def filter_endpoints(endpoints, domain, all_domains=None):
         if in_scope:
             clean.append(url)
 
-    return unique_list(clean)
+    from core.utils import canonicalize_url_schemes
+    return canonicalize_url_schemes(unique_list(clean))
 
 
 # =========================================================
