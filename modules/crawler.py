@@ -17,7 +17,7 @@ from core.output import save_txt, unique_list, debug_log
 from core.runner import run_command, run_command_with_input
 from core.filter import filter_urls_multi_domain, collapse_url_patterns
 
-def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all_domains=None):
+def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all_domains=None, custom_headers=None):
     if not targets or not is_tool_available(KATANA):
         return [], []
     print("\n[+] Running Katana (Active Spidering)")
@@ -38,6 +38,10 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all
         "-rl", str(rl), "-retry", "2",
         "-c", str(KATANA_THREADS), "-d", str(KATANA_DEPTH), "-silent", "-o", output_file
     ]
+    if custom_headers:
+        for header in custom_headers:
+            cmd.extend(["-H", header])
+
     run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=ep_raw_dir)
     
     js_files = set()
@@ -45,7 +49,7 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all
     default_target = targets[0] if targets else (all_domains[0] if all_domains else None)
     
     if os.path.exists(output_file):
-        with open(output_file, 'r') as f:
+        with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
                 raw_url = line.strip()
                 if not raw_url:
@@ -95,7 +99,7 @@ def run_katana(targets, paths, debug=False, base_latency=5, rate_limit=None, all
     
     return list(js_files), list(endpoints)
 
-def run_hakrawler(targets, paths, debug=False, base_latency=5, all_domains=None):
+def run_hakrawler(targets, paths, debug=False, base_latency=5, all_domains=None, custom_headers=None):
     if not targets or not is_tool_available(HAKRAWLER):
         return [], []
     print("\n[+] Running Hakrawler (Fast Spidering)")
@@ -110,6 +114,10 @@ def run_hakrawler(targets, paths, debug=False, base_latency=5, all_domains=None)
     timeout = get_tool_timeout(base_latency, "heavy", item_count=len(targets))
     input_data = "\n".join(targets) + "\n"
     cmd = [HAKRAWLER, "-d", str(HAKRAWLER_DEPTH), "-t", str(HAKRAWLER_THREADS), "-u"]
+    if custom_headers:
+        for header in custom_headers:
+            cmd.extend(["-h", header])
+
     lines = run_command_with_input(cmd, input_data, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=ep_raw_dir)
     
     default_target = targets[0] if targets else (all_domains[0] if all_domains else None)
@@ -253,7 +261,7 @@ def _run_waybackurls(domain, paths, base_latency=5, effective_domains=None):
     return lines
 
 
-def _run_gospider(targets, paths, base_latency=5, effective_domains=None):
+def _run_gospider(targets, paths, base_latency=5, effective_domains=None, custom_headers=None):
     """Active-crawl top targets with gospider and extract all discovered URLs."""
     if not targets or not is_tool_available(GOSPIDER):
         return []
@@ -267,6 +275,9 @@ def _run_gospider(targets, paths, base_latency=5, effective_domains=None):
     default_target = targets[0] if targets else (effective_domains[0] if effective_domains else None)
     timeout = get_tool_timeout(base_latency, "heavy", item_count=len(capped))
     cmd = [GOSPIDER, "-S", input_file, "-d", str(GOSPIDER_DEPTH), "-t", str(GOSPIDER_THREADS), "-m", "15"]
+    if custom_headers:
+        for header in custom_headers:
+            cmd.extend(["-H", header])
     raw_lines = run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
 
     all_urls = []
@@ -302,7 +313,7 @@ def _run_waymore(domain, paths, base_latency=5, effective_domains=None):
     run_command(cmd, timeout=timeout, debug_path=f"{paths['base']}/debug.txt", cwd=paths['endpoints'])
     lines = []
     if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-        with open(output_file, "r") as f:
+        with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
             for l in f:
                 u = reconstruct_url(l, default_domain=domain)
                 if u and is_valid_url(u):
@@ -336,7 +347,7 @@ def _run_urlfinder(domain, paths, base_latency=5, effective_domains=None):
     return lines
 
 
-def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None):
+def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None, custom_headers=None):
     """
     Orchestrate gau, waybackurls, gospider, waymore, and urlfinder in parallel.
     Returns (js_files, endpoints) deduplicated and filtered as valid URLs.
@@ -349,7 +360,7 @@ def run_url_collection(domain, targets, paths, base_latency=5, all_domains=None)
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
         fut_gau = pool.submit(_run_gau,         domain,  paths, base_latency, effective_domains)
         fut_wb  = pool.submit(_run_waybackurls,  domain,  paths, base_latency, effective_domains)
-        fut_gs  = pool.submit(_run_gospider,     targets, paths, base_latency, effective_domains)
+        fut_gs  = pool.submit(_run_gospider,     targets, paths, base_latency, effective_domains, custom_headers)
         fut_wm  = pool.submit(_run_waymore,      domain,  paths, base_latency, effective_domains)
         fut_uf  = pool.submit(_run_urlfinder,    domain,  paths, base_latency, effective_domains)
 

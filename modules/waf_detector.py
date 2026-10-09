@@ -1,5 +1,6 @@
 import os
 import re
+import tempfile
 from config.tools import WAFW00F, NOMORE403, is_tool_available
 from config.wordlists import NOMORE403_PAYLOADS
 from core.output import save_txt, unique_list
@@ -21,7 +22,7 @@ WAF_BYPASS_HEADERS = [
 # 🛡️ WAF DETECTOR MODULE (SMART SAFETY)
 # =========================================================
 
-def detect_waf(url):
+def detect_waf(url, custom_headers=None):
     """
     Runs wafw00f on a single target to detect WAF presence.
     Returns the WAF name or None.
@@ -34,8 +35,16 @@ def detect_waf(url):
         return None
 
     print(f"[?] Checking for WAF on {target_url}")
+    tmp_hdr = None
     try:
         cmd = [WAFW00F, "--no-colors", "-a", target_url]
+        if custom_headers:
+            fd, tmp_hdr = tempfile.mkstemp()
+            with os.fdopen(fd, 'w') as f:
+                for h in custom_headers:
+                    f.write(h + "\n")
+            cmd.extend(["-H", tmp_hdr])
+            
         res_lines = run_command(cmd, timeout=45)
         output = "\n".join(res_lines)
         
@@ -48,9 +57,12 @@ def detect_waf(url):
         return None
     except Exception:
         return None
+    finally:
+        if tmp_hdr and os.path.exists(tmp_hdr):
+            os.remove(tmp_hdr)
 
 
-def get_safety_profile(targets, limit=5):
+def get_safety_profile(targets, limit=5, custom_headers=None):
     """
     Checks a sample of targets and returns a global safety recommendation.
     """
@@ -67,7 +79,7 @@ def get_safety_profile(targets, limit=5):
     sample = targets[:limit]
     
     for t in sample:
-        waf = detect_waf(t)
+        waf = detect_waf(t, custom_headers=custom_headers)
         if waf:
             waf_count += 1
             detected_wafs.add(waf)
@@ -94,7 +106,7 @@ def get_safety_profile(targets, limit=5):
 # =========================================================
 # 🔓 403 FORBIDDEN BYPASS MODULE (NOMORE403)
 # =========================================================
-def run_nomore403(endpoints_403, paths, base_latency=5):
+def run_nomore403(endpoints_403, paths, base_latency=5, custom_headers=None):
     """
     Runs nomore403 on endpoints returning 403 status code to attempt bypass.
     Outputs strictly valid URLs to bypassed_403.txt.
@@ -117,6 +129,9 @@ def run_nomore403(endpoints_403, paths, base_latency=5):
             continue
         try:
             cmd = [NOMORE403, "-u", target_ep, "--no-banner"]
+            if custom_headers:
+                for h in custom_headers:
+                    cmd.extend(["-H", h])
             if os.path.exists(NOMORE403_PAYLOADS):
                 cmd.extend(["-f", NOMORE403_PAYLOADS])
             lines = run_command(cmd, timeout=med_timeout, cwd=paths['endpoints'])

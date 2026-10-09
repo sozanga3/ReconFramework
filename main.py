@@ -158,7 +158,8 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
             monitor=monitor, deep_crawl=deep_crawl, bypass_waf=bypass_waf,
             run_nuclei_flag=run_nuclei_flag, run_port_scan_flag=run_port_scan_flag,
             custom_rate_limit=custom_rate_limit, all_domains=all_domains,
-            dynamic_timeout=dynamic_timeout, start_time=start_time
+            dynamic_timeout=dynamic_timeout, start_time=start_time,
+            headers=args.header
         )
     except KeyboardInterrupt:
         elapsed_time = time.time() - start_time
@@ -190,7 +191,7 @@ def main(domain, output_dir=None, top_limit=10, resume=False, monitor=False, dee
 # =========================================================
 # ⚙️ RECON PIPELINE ORCHESTRATION ENGINE
 # =========================================================
-def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, resume=False, monitor=False, deep_crawl=False, bypass_waf=False, run_nuclei_flag=False, run_port_scan_flag=False, custom_rate_limit=None, all_domains=None, dynamic_timeout=5, start_time=None):
+def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, resume=False, monitor=False, deep_crawl=False, bypass_waf=False, run_nuclei_flag=False, run_port_scan_flag=False, custom_rate_limit=None, all_domains=None, dynamic_timeout=5, start_time=None, headers=None):
     previous_stats = {}
     if monitor:
         stats_file = f"{paths['base']}/stats.json"
@@ -236,7 +237,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
     # ☁️ CLOUD RECON
     # ---------------------------------
     cloud_assets = run_or_resume(resume, paths, "cloud_recon", f"{paths['cloud']}/cloud_assets.txt", "list",
-                                 run_cloud_recon, domain, paths, base_latency=dynamic_timeout)
+                                 run_cloud_recon, domain, paths, base_latency=dynamic_timeout, custom_headers=headers)
 
     # ---------------------------------
     # 🔌 PORT SCANNING (NAABU)
@@ -264,7 +265,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
             print(f"[!] Warning: Could not load safety profile JSON - {e}")
     else:
         apex_targets = [f"https://{domain}", f"https://www.{domain}"]
-        safety_profile = get_safety_profile(apex_targets)
+        safety_profile = get_safety_profile(apex_targets, custom_headers=headers)
     
     dynamic_rl = custom_rate_limit
     dynamic_cc = None
@@ -282,7 +283,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
     # 🌐 HTTPX PROBE + SCORING
     # ---------------------------------
     http_results = run_or_resume(resume, paths, "httpx", f"{paths['httpx']}/results.json", "json",
-                                 run_httpx, httpx_input, paths, base_latency=dynamic_timeout, bypass_waf=bypass_waf, rate_limit=dynamic_rl)
+                                 run_httpx, httpx_input, paths, base_latency=dynamic_timeout, bypass_waf=bypass_waf, rate_limit=dynamic_rl, custom_headers=headers)
 
     ranked = http_results or []
     top_targets = [r["url"] for r in ranked[:top_limit] if isinstance(r, dict) and r.get("url")]
@@ -295,7 +296,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
     # Refine safety profile across top ranked targets if not resumed
     if not (resume and is_step_completed(paths, "waf") and os.path.exists(safety_json)):
         if top_targets:
-            full_safety = get_safety_profile(top_targets)
+            full_safety = get_safety_profile(top_targets, custom_headers=headers)
             if full_safety.get("wafs"):
                 safety_profile["wafs"] = unique_list(safety_profile["wafs"] + full_safety["wafs"])
                 safety_profile["recommendation"] = full_safety["recommendation"]
@@ -314,11 +315,11 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
     # 🖥️ ACTIVE CRAWLING & PASSIVE
     # ---------------------------------
     katana_js, katana_ep = run_or_resume(resume, paths, "katana", f"{paths['endpoints_raw']}/katana_raw.txt", "tuple",
-                                         run_katana, top_targets, paths, base_latency=dynamic_timeout, rate_limit=dynamic_rl, all_domains=all_domains) or ([], [])
+                                         run_katana, top_targets, paths, base_latency=dynamic_timeout, rate_limit=dynamic_rl, all_domains=all_domains, custom_headers=headers) or ([], [])
     hakrawler_js, hakrawler_ep = run_or_resume(resume, paths, "hakrawler", f"{paths['endpoints']}/hakrawler_raw.txt", "tuple",
-                                                run_hakrawler, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains) or ([], [])
+                                                run_hakrawler, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains, custom_headers=headers) or ([], [])
     passive_js, passive_ep = run_or_resume(resume, paths, "passive", f"{paths['endpoints']}/passive_urls.txt", "tuple",
-                                            run_url_collection, domain, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains) or ([], [])
+                                            run_url_collection, domain, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains, custom_headers=headers) or ([], [])
 
     pre_collected_js = unique_list(katana_js + hakrawler_js + passive_js)
 
@@ -328,7 +329,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
     if not resume or not is_step_completed(paths, "js_enum"):
         js_files, endpoints, secrets, js_subs = run_js_enum(
             domain, top_targets, paths, base_latency=dynamic_timeout, extra_js=pre_collected_js,
-            all_domains=all_domains
+            all_domains=all_domains, custom_headers=headers
         )
         save_state(paths, "js_enum")
     else:
@@ -400,7 +401,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
                 subs = clean_subdomains(unique_list(subs + discovered_new), domain)
                 save_txt(f"{paths['subdomains']}/all.txt", subs)
                 
-                new_http = run_httpx(discovered_new, paths, suffix="_feedback", base_latency=dynamic_timeout, bypass_waf=bypass_waf, rate_limit=dynamic_rl)
+                new_http = run_httpx(discovered_new, paths, suffix="_feedback", base_latency=dynamic_timeout, bypass_waf=bypass_waf, rate_limit=dynamic_rl, custom_headers=headers)
                 http_results += new_http
                 save_json(f"{paths['httpx']}/results.json", http_results)
                 save_txt(f"{paths['httpx']}/alive.txt", reconstruct_urls_list([r["url"] for r in http_results if isinstance(r, dict) and r.get("url")]))
@@ -413,8 +414,8 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
                     print("[+] Deep Crawl: Active spidering on newly discovered assets!")
                     new_alive = [r["url"] for r in new_http if isinstance(r, dict) and r.get("url")]
                     if new_alive:
-                        new_k_js, new_k_ep = run_katana(new_alive, paths, base_latency=dynamic_timeout, all_domains=all_domains)
-                        new_h_js, new_h_ep = run_hakrawler(new_alive, paths, base_latency=dynamic_timeout, all_domains=all_domains)
+                        new_k_js, new_k_ep = run_katana(new_alive, paths, base_latency=dynamic_timeout, all_domains=all_domains, custom_headers=headers)
+                        new_h_js, new_h_ep = run_hakrawler(new_alive, paths, base_latency=dynamic_timeout, all_domains=all_domains, custom_headers=headers)
                         endpoints = unique_list(endpoints + new_k_ep + new_h_ep)
                         js_files = unique_list(js_files + new_k_js + new_h_js)
                         clean_endpoints = unique_list(clean_endpoints + new_k_ep + new_h_ep)
@@ -430,13 +431,13 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
     # ---------------------------------
     if not resume or not is_step_completed(paths, "param_discovery"):
         from modules.param_discovery import run_kiterunner
-        kr_routes = run_kiterunner(top_targets, paths, base_latency=dynamic_timeout, rate_limit=dynamic_rl)
+        kr_routes = run_kiterunner(top_targets, paths, base_latency=dynamic_timeout, rate_limit=dynamic_rl, custom_headers=headers)
         if kr_routes:
             endpoints = unique_list(endpoints + kr_routes)
             clean_endpoints = reconstruct_urls_list(clean_endpoints + kr_routes, default_domain=domain, effective_domains=all_domains)
             save_txt(f"{paths['endpoints']}/all_endpoints.txt", clean_endpoints)
             
-        all_params, scored_params = run_param_discovery(domain, clean_endpoints, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains)
+        all_params, scored_params = run_param_discovery(domain, clean_endpoints, top_targets, paths, base_latency=dynamic_timeout, all_domains=all_domains, custom_headers=headers)
         save_state(paths, "param_discovery")
     else:
         print("[*] Skipping param_discovery")
@@ -450,7 +451,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
         from modules.waf_detector import run_nomore403
         status_403_urls = [r["url"] for r in http_results if isinstance(r, dict) and r.get("status_code") == 403 and r.get("url")]
         eps_403 = status_403_urls if status_403_urls else [ep for ep in high_ep if ep.startswith("http")][:15]
-        run_nomore403(eps_403, paths, base_latency=dynamic_timeout)
+        run_nomore403(eps_403, paths, base_latency=dynamic_timeout, custom_headers=headers)
         save_state(paths, "bypass_403")
 
     # ---------------------------------
@@ -483,7 +484,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
     if run_nuclei_flag:
         nuclei_results = run_or_resume(resume, paths, "nuclei", f"{paths['fuzzing']}/nuclei_results.txt", "list",
                                        run_nuclei, domain, nuclei_targets, paths, rate_limit=dynamic_rl, 
-                                       concurrency=dynamic_cc, debug=True, base_latency=dynamic_timeout, bypass_waf=bypass_waf)
+                                       concurrency=dynamic_cc, debug=True, base_latency=dynamic_timeout, bypass_waf=bypass_waf, custom_headers=headers)
         
         if nuclei_results:
             notify_vuln_found(domain, len(nuclei_results))
@@ -493,7 +494,7 @@ def _run_pipeline(domain, paths, current_stats, output_dir=None, top_limit=10, r
     # Screenshots (gowitness)
     if not resume or not is_step_completed(paths, "screenshots"):
         all_urls = reconstruct_urls_list([r["url"] for r in ranked if isinstance(r, dict) and r.get("url")])
-        run_screenshots(all_urls, paths, debug=True)
+        run_screenshots(all_urls, paths, debug=True, custom_headers=headers)
         save_state(paths, "screenshots")
 
     # ---------------------------------
@@ -592,6 +593,7 @@ if __name__ == "__main__":
     parser.add_argument("--review", action="store_true", help="Launch interactive Firefox tab review on discovered alive targets/endpoints")
     parser.add_argument("--review-size", type=int, default=10, help="Batch size for --review (default: 10 URLs per chunk)")
     parser.add_argument("--check-tools", action="store_true", help="Inspect and display status of all configured reconnaissance tools")
+    parser.add_argument("-H", "--header", action="append", help="Custom header to pass to tools (e.g. -H 'Authorization: Bearer xyz'). Can be used multiple times.")
 
     args = parser.parse_args()
 

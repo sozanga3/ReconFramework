@@ -38,6 +38,7 @@ def dedupe_endpoints(endpoints):
 from config.settings import (
     KATANA_THREADS, 
     KATANA_DEPTH, 
+    KATANA_RATE_LIMIT,
     JSLUICE_THREADS,
     JSLEAK_THREADS,
     SOURCEMAPPER_ENABLED,
@@ -232,33 +233,41 @@ def collect_urls(domain, targets, paths, base_latency=5):
 # =========================================================
 # 🕷️ ACTIVE CRAWLING
 # =========================================================
-def crawl_targets(targets, paths, base_latency=5):
-    """Active crawl with katana for JS discovery. gospider is handled by crawler.py."""
-    if not targets:
+def crawl_targets(targets, paths, base_latency=5, rate_limit=None):
+    """Active crawl with katana for JS discovery using native list input for maximum performance."""
+    if not targets or not is_tool_available(KATANA):
         return []
 
     print(f"[+] Crawling {len(targets)} targets (katana — JS-focused)...")
 
-    heavy_timeout = get_tool_timeout(base_latency, "heavy")
+    heavy_timeout = get_tool_timeout(base_latency, "heavy", item_count=len(targets))
+    ep_dir = paths.get('endpoints_raw', paths.get('endpoints', paths.get('base', '')))
+    input_file = f"{ep_dir}/katana_js_targets.txt"
+    output_file = f"{ep_dir}/katana_js_raw.txt"
 
-    def crawl_single(t):
-        return run_command(
-            [
-                KATANA, "-u", t, "-jc", "-kf", "all",
-                "-ef", "png,jpg,gif,jpeg,svg,css,woff,woff2,ttf,ico", "-xhr",
-                "-rl", "50", "-retry", "2",
-                "-c", str(KATANA_THREADS), "-d", str(KATANA_DEPTH), "-silent", "-timeout", str(heavy_timeout)
-            ],
-            timeout=heavy_timeout * 2,
-            cwd=paths['endpoints']
-        )
+    save_txt(input_file, targets)
+    rl = rate_limit if rate_limit else KATANA_RATE_LIMIT
 
-    with ThreadPoolExecutor(max_workers=min(len(targets), 5)) as executor:
-        results = list(executor.map(crawl_single, targets))
+    cmd = [
+        KATANA, "-list", input_file, "-jc", "-kf", "all",
+        "-ef", "png,jpg,gif,jpeg,svg,css,woff,woff2,ttf,ico", "-xhr",
+        "-rl", str(rl), "-retry", "2",
+        "-c", str(KATANA_THREADS), "-d", str(KATANA_DEPTH), "-silent", "-o", output_file
+    ]
+    debug_path = f"{paths.get('base', '')}/debug.txt" if paths.get('base') else None
+    run_command(cmd, timeout=heavy_timeout, debug_path=debug_path, cwd=ep_dir)
 
     urls = []
-    for r in results:
-        urls.extend(r)
+    if os.path.exists(output_file):
+        with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                line_str = line.strip()
+                if line_str:
+                    urls.append(line_str)
+        try:
+            os.remove(input_file)
+        except OSError:
+            pass
 
     return unique_list(urls)
 
@@ -288,7 +297,7 @@ def extract_js(urls):
 # =========================================================
 # 📥 DOWNLOAD JS FILES (FOR ANALYSIS)
 # =========================================================
-def download_js_files(js_urls, download_path, base_latency=5, domain=None):
+def download_js_files(js_urls, download_path, base_latency=5, domain=None, custom_headers=None):
     print(f"[+] Downloading {len(js_urls)} JS files for analysis...")
     
     if not js_urls:
@@ -318,6 +327,9 @@ def download_js_files(js_urls, download_path, base_latency=5, domain=None):
     try:
         # httpx -sr (save response) -srd (save response directory)
         cmd = [HTTPX, "-l", tmp_urls, "-sr", "-srd", download_path, "-silent", "-threads", str(HTTPX_THREADS), "-timeout", str(med_timeout)]
+        if custom_headers:
+            for header in custom_headers:
+                cmd.extend(["-H", header])
         run_command(cmd, cwd=os.path.dirname(download_path))
 
         # Save standalone discovered subdomains from direct extraction
@@ -682,7 +694,7 @@ def run_xnlinkfinder(domain, js_files, paths, base_latency=5):
 # =========================================================
 # 🔎 ENDPOINT PROBE
 # =========================================================
-def probe_endpoints(endpoints, domain, paths, base_latency=5):
+def probe_endpoints(endpoints, domain, paths, base_latency=5, custom_headers=None):
     print(f"[+] Probing {len(endpoints)} discovered endpoints for validity...")
     
     if not endpoints:
@@ -710,6 +722,9 @@ def probe_endpoints(endpoints, domain, paths, base_latency=5):
     try:
         # Fast probe with httpx
         cmd = [HTTPX, "-l", tmp_in, "-status-code", "-silent", "-threads", str(HTTPX_THREADS), "-json", "-o", tmp_out, "-timeout", str(med_timeout)]
+        if custom_headers:
+            for header in custom_headers:
+                cmd.extend(["-H", header])
         run_command(cmd, cwd=paths['js'])
         
         probed = []
@@ -972,14 +987,18 @@ def run_secretfinder(domain, js_urls, download_path, paths, base_latency=5):
 # =========================================================
 # 🧠 MAIN JS ENUM
 # =========================================================
-def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=None, all_domains=None):
+def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=None, all_domains=None, custom_headers=None):
     print("\n[+] JavaScript Enumeration (INTELLIGENCE LAYER)\n")
 
     # 1. Passive URLs (getJS only — gau/waybackurls handled by crawler.py)
     passive_urls = collect_urls(domain, targets, paths, base_latency=base_latency)
 
-    # 2. Active crawl
-    crawled_urls = crawl_targets(targets, paths, base_latency=base_latency)
+    # 2. Active crawl (skip redundant crawl if Stage 7 crawlers already supplied pre-collected JS)
+    if extra_js:
+        print(f"[*] Reusing {len(extra_js)} pre-collected JS URLs from crawling stage (skipping duplicate Katana active crawl)")
+        crawled_urls = []
+    else:
+        crawled_urls = crawl_targets(targets, paths, base_latency=base_latency)
 
     # 3. Merge & Filter Scope (accept URLs belonging to ANY of the scanned domains)
     all_urls = unique_list(passive_urls + crawled_urls)
@@ -998,7 +1017,7 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
 
     # 5. Download & Deep Extraction (with mapping)
     download_path = f"{paths['js']}/downloads"
-    js_subdomains_from_urls = download_js_files(download_targets, download_path, base_latency=base_latency, domain=domain)
+    js_subdomains_from_urls = download_js_files(download_targets, download_path, base_latency=base_latency, domain=domain, custom_headers=custom_headers)
     
     endpoints, endpoints_map = extract_endpoints(download_path, domain=domain)
     secrets, secrets_map = detect_secrets(download_path)
@@ -1041,7 +1060,7 @@ def run_js_enum(domain, targets, paths, debug=False, base_latency=5, extra_js=No
     clean_endpoints_for_probing = filter_endpoints(endpoints, domain, all_domains=all_domains)
 
     # 7. Probe filtered discovered endpoints
-    probed_results = probe_endpoints(clean_endpoints_for_probing, domain, paths, base_latency=base_latency)
+    probed_results = probe_endpoints(clean_endpoints_for_probing, domain, paths, base_latency=base_latency, custom_headers=custom_headers)
 
     # 8. Intelligence Mapping
     intelligence = {

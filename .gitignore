@@ -47,3 +47,11 @@ AGENTS.md
 CONTEXT.md
 .agents/
 
+# External Clones & Testing
+Claude-BugHunter/
+test_is_valid.py
+pre_filter.txt
+resolved_clean.txt
+resolvers.txt
+
+

@@ -92,8 +92,7 @@ EXCLUDED_EXTENSIONS = [
 # These are filtered out during parameter discovery to reduce noise.
 NOISE_PARAMS = [
     "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-    "gclid", "fbclid", "ref", "referrer", "sessionid", "sid", "token",
-    "auth", "access_token", "_ga", "_gid", "_fbp", "_fbc",
+    "gclid", "fbclid", "_ga", "_gid", "_fbp", "_fbc",
     "_hs", "_hsenc", "_hstc", "_hssc", "_hssrc",
 ]
 

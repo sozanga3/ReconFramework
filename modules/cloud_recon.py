@@ -7,13 +7,19 @@ from core.utils import get_tool_timeout, reconstruct_url, is_valid_url
 # ☁️ CLOUD RECON MODULE (S3 / AZURE / GCP / DIGITALOCEAN)
 # =========================================================
 
-def check_bucket(platform_name, url, timeout=5):
+def check_bucket(platform_name, url, timeout=5, custom_headers=None):
     """
     Checks if a cloud bucket exists and is public.
     Returns dict with status, platform, and url or None.
     """
     try:
-        r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+        req_headers = {"User-Agent": "Mozilla/5.0"}
+        if custom_headers:
+            for h in custom_headers:
+                if ":" in h:
+                    k, v = h.split(":", 1)
+                    req_headers[k.strip()] = v.strip()
+        r = requests.get(url, timeout=timeout, headers=req_headers)
         # 200 OK -> Likely public and listable
         if r.status_code == 200:
             status = "PUBLIC" if ("ListBucketResult" in r.text or "BlobList" in r.text or "<Contents>" in r.text) else "ALIVE"
@@ -26,7 +32,7 @@ def check_bucket(platform_name, url, timeout=5):
         return None
 
 
-def run_cloud_recon(domain, paths, base_latency=5):
+def run_cloud_recon(domain, paths, base_latency=5, custom_headers=None):
     print(f"\n[+] Running Cloud Recon for {domain} (Concurrent Engine)")
     
     http_timeout = min(5, max(3, base_latency))
@@ -69,7 +75,7 @@ def run_cloud_recon(domain, paths, base_latency=5):
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
         future_to_target = {
-            executor.submit(check_bucket, p_name, url, http_timeout): (p_name, url)
+            executor.submit(check_bucket, p_name, url, http_timeout, custom_headers): (p_name, url)
             for p_name, url in targets_to_check
         }
         for future in concurrent.futures.as_completed(future_to_target):

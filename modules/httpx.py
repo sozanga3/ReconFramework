@@ -10,7 +10,7 @@ from core.runner import run_command
 # =========================================================
 # ⚙️ RUN HTTPX
 # =========================================================
-def run_httpx(subdomains, paths, debug=False, suffix="", base_latency=5, bypass_waf=False, rate_limit=None):
+def run_httpx(subdomains, paths, debug=False, suffix="", base_latency=5, bypass_waf=False, rate_limit=None, custom_headers=None):
     print("\n[+] Running httpx (deep probe + scoring)")
 
     per_host_timeout = get_tool_timeout(base_latency, "medium")
@@ -56,6 +56,10 @@ def run_httpx(subdomains, paths, debug=False, suffix="", base_latency=5, bypass_
 
     if bypass_waf:
         cmd.extend(["-H", "X-Forwarded-For: 127.0.0.1", "-H", "X-Originating-IP: 127.0.0.1"])
+
+    if custom_headers:
+        for header in custom_headers:
+            cmd.extend(["-H", header])
 
     try:
         debug_file = f"{paths['httpx']}/debug.txt"

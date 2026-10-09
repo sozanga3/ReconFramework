@@ -627,6 +627,12 @@ def filter_wildcards(subs, domain, paths, debug=False):
     
     if resolvers_file and os.path.exists(resolvers_file) and is_tool_available(PUREDNS):
         cmd = [PUREDNS, "resolve", input_file, "-r", resolvers_file, "-w", out_file, "-q", "-l", str(PUREDNS_RATE_LIMIT)]
+        
+        # Rule 4: Data Preservation Guarantee. Active/brute-force tools have already filtered wildcards. 
+        # For passive subdomains, we MUST skip wildcard filtering so valid vhosts sharing the wildcard IP aren't deleted.
+        if has_wildcard:
+            cmd.append("--skip-wildcard-filter")
+            
         if is_tool_available(MASSDNS):
             cmd.extend(["-b", MASSDNS])
         try:
@@ -634,7 +640,7 @@ def filter_wildcards(subs, domain, paths, debug=False):
             if os.path.exists(out_file):
                 with open(out_file, "r") as f:
                     valid = [line.strip() for line in f if line.strip() and is_valid_subdomain(line.strip(), domain)]
-                print(f"[+] Wildcard filtering removed {len(subs) - len(valid)} dead/fake subdomains")
+                print(f"[+] DNS resolution removed {len(subs) - len(valid)} dead subdomains")
                 return valid
         except Exception as e:
             if debug: print(f"[DEBUG] puredns wildcard filter error: {e}")
@@ -649,10 +655,7 @@ def filter_wildcards(subs, domain, paths, debug=False):
         def check_host(h):
             try:
                 ans = socket.getaddrinfo(h, None, socket.AF_INET)
-                ips = {a[4][0] for a in ans}
-                # If host only resolves to wildcard IPs and is not apex/www, treat as wildcard noise
-                if ips.issubset(wildcard_ips) and h not in [domain, f"www.{domain}"]:
-                    return None
+                # Rule 4: Data Preservation Guarantee. Do not drop passive subdomains resolving to wildcard IP.
                 return h
             except Exception:
                 return None
@@ -663,7 +666,7 @@ def filter_wildcards(subs, domain, paths, debug=False):
                 if r and is_valid_subdomain(r, domain):
                     clean_valid.append(r)
 
-        print(f"[+] Native fallback removed {len(subs) - len(clean_valid)} wildcard subdomains")
+        print(f"[+] Native fallback removed {len(subs) - len(clean_valid)} dead subdomains")
         save_txt(out_file, clean_valid)
         return clean_valid
 

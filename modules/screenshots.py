@@ -9,7 +9,7 @@ from core.utils import reconstruct_urls_list
 # =========================================================
 # 📸 SCREENSHOT MODULE (gowitness)
 # =========================================================
-def run_screenshots(targets, paths, debug=False):
+def run_screenshots(targets, paths, debug=False, custom_headers=None):
     if not targets or not is_tool_available(GOWITNESS):
         return
     print("\n[+] Taking Screenshots (gowitness)\n")
@@ -39,6 +39,10 @@ def run_screenshots(targets, paths, debug=False):
             "--write-jsonl",
             "--write-jsonl-file", json_file
         ]
+        
+        if custom_headers:
+            for h in custom_headers:
+                cmd.extend(["--chrome-header", h])
 
         # Use run_command with a calculated timeout
         from core.runner import run_command

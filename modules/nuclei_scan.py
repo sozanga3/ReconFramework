@@ -10,7 +10,7 @@ from config.tools import NUCLEI, is_tool_available
 # =========================================================
 # 🚀 NUCLEI MODULE (SMART + LOW NOISE)
 # =========================================================
-def run_nuclei(domain, targets, paths, rate_limit=None, concurrency=None, debug=False, base_latency=5, bypass_waf=False):
+def run_nuclei(domain, targets, paths, rate_limit=None, concurrency=None, debug=False, base_latency=5, bypass_waf=False, custom_headers=None):
     if not targets or not is_tool_available(NUCLEI):
         return []
     print("\n[+] Running Nuclei (Smart Scan)\n")
@@ -58,6 +58,10 @@ def run_nuclei(domain, targets, paths, rate_limit=None, concurrency=None, debug=
 
         if bypass_waf:
             cmd.extend(["-H", "X-Forwarded-For: 127.0.0.1", "-H", "X-Originating-IP: 127.0.0.1"])
+
+        if custom_headers:
+            for header in custom_headers:
+                cmd.extend(["-H", header])
 
         res_lines = run_command(
             cmd,

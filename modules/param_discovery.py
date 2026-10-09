@@ -70,7 +70,7 @@ def extract_params_from_urls(urls):
 # =========================================================
 # 🤖 RUN ARJUN
 # =========================================================
-def run_arjun(targets, paths, base_latency=5, custom_wordlist=None):
+def run_arjun(targets, paths, base_latency=5, custom_wordlist=None, custom_headers=None):
     if not targets or not is_tool_available(ARJUN):
         return []
 
@@ -87,13 +87,17 @@ def run_arjun(targets, paths, base_latency=5, custom_wordlist=None):
             f.write(f"{t}\n")
             
     try:
+        header_flags = []
+        if custom_headers:
+            header_flags = ["--headers", "\n".join(custom_headers)]
+
         # Pass 1: Custom Intelligent Wordlist (GET & JSON)
         if custom_wordlist and os.path.exists(custom_wordlist):
             print("  -> Pass 1: Intelligent Wordlist (GET)")
-            run_command([ARJUN, "-i", tmp_in, "-oJ", f"{tmp_out}_custom", "-w", custom_wordlist, "-t", str(ARJUN_THREADS), "-q"], timeout=timeout * 5)
+            run_command([ARJUN, "-i", tmp_in, "-oJ", f"{tmp_out}_custom", "-w", custom_wordlist, "-t", str(ARJUN_THREADS), "-q"] + header_flags, timeout=timeout * 5)
             
             print("  -> Pass 2: Intelligent Wordlist (JSON Body)")
-            run_command([ARJUN, "-i", tmp_in, "-oJ", f"{tmp_out}_custom_json", "-m", "JSON", "-w", custom_wordlist, "-t", str(ARJUN_THREADS), "-q"], timeout=timeout * 5)
+            run_command([ARJUN, "-i", tmp_in, "-oJ", f"{tmp_out}_custom_json", "-m", "JSON", "-w", custom_wordlist, "-t", str(ARJUN_THREADS), "-q"] + header_flags, timeout=timeout * 5)
             
             for out_file in [f"{tmp_out}_custom", f"{tmp_out}_custom_json"]:
                 if os.path.exists(out_file) and os.path.getsize(out_file) > 0:
@@ -108,7 +112,7 @@ def run_arjun(targets, paths, base_latency=5, custom_wordlist=None):
 
         # Pass 3: Default Tool Wordlist (GET)
         print("  -> Pass 3: Default Tool Wordlist (GET)")
-        run_command([ARJUN, "-i", tmp_in, "-oJ", tmp_out, "-t", str(ARJUN_THREADS), "-q"], timeout=timeout * 10, cwd=paths['params'])
+        run_command([ARJUN, "-i", tmp_in, "-oJ", tmp_out, "-t", str(ARJUN_THREADS), "-q"] + header_flags, timeout=timeout * 10, cwd=paths['params'])
         
         # Read the JSON output
         if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
@@ -138,7 +142,7 @@ def run_arjun(targets, paths, base_latency=5, custom_wordlist=None):
 # =========================================================
 # 🚀 RUN X8 (THE SPEED KING)
 # =========================================================
-def run_x8(targets, paths, base_latency=5, custom_wordlist=None):
+def run_x8(targets, paths, base_latency=5, custom_wordlist=None, custom_headers=None):
     if not targets or not is_tool_available(X8):
         return []
 
@@ -187,13 +191,17 @@ def run_x8(targets, paths, base_latency=5, custom_wordlist=None):
                     pass
             return extracted
 
+        header_flags = []
+        if custom_headers:
+            header_flags = ["-H"] + custom_headers
+
         # Pass 1 & 2: Custom Intelligent Wordlist (GET & POST)
         if custom_wordlist and os.path.exists(custom_wordlist):
             print("  -> Pass 1: Intelligent Wordlist (GET)")
-            run_command([X8, "-u", tmp_in, "-o", f"{tmp_out}_custom", "-O", "json", "-w", custom_wordlist, "--disable-progress-bar", "-W", str(X8_THREADS)], timeout=timeout * 5)
+            run_command([X8, "-u", tmp_in, "-o", f"{tmp_out}_custom", "-O", "json", "-w", custom_wordlist, "--disable-progress-bar", "-W", str(X8_THREADS)] + header_flags, timeout=timeout * 5)
             
             print("  -> Pass 2: Intelligent Wordlist (POST Body)")
-            run_command([X8, "-u", tmp_in, "-o", f"{tmp_out}_custom_post", "-O", "json", "-w", custom_wordlist, "-X", "POST", "--disable-progress-bar", "-W", str(X8_THREADS)], timeout=timeout * 5)
+            run_command([X8, "-u", tmp_in, "-o", f"{tmp_out}_custom_post", "-O", "json", "-w", custom_wordlist, "-X", "POST", "--disable-progress-bar", "-W", str(X8_THREADS)] + header_flags, timeout=timeout * 5)
             
             for out_file in [f"{tmp_out}_custom", f"{tmp_out}_custom_post"]:
                 found_params.update(_extract_x8_params(out_file))
@@ -202,7 +210,7 @@ def run_x8(targets, paths, base_latency=5, custom_wordlist=None):
 
         # Pass 3: Default Tool Wordlist
         print("  -> Pass 3: Default Tool Wordlist (GET)")
-        run_command([X8, "-u", tmp_in, "-o", tmp_out, "-O", "json", "--disable-progress-bar", "-W", str(X8_THREADS)], timeout=timeout * 5, cwd=paths['params'])
+        run_command([X8, "-u", tmp_in, "-o", tmp_out, "-O", "json", "--disable-progress-bar", "-W", str(X8_THREADS)] + header_flags, timeout=timeout * 5, cwd=paths['params'])
         
         if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
             try:
@@ -299,7 +307,7 @@ def run_paramspider(domain, paths, base_latency=5, all_domains=None):
 # =========================================================
 # 🚀 RUN KITERUNNER (API ROUTE DISCOVERY)
 # =========================================================
-def run_kiterunner(targets, paths, base_latency=5, rate_limit=None):
+def run_kiterunner(targets, paths, base_latency=5, rate_limit=None, custom_headers=None):
     if not targets or not is_tool_available(KR):
         return []
         
@@ -357,6 +365,9 @@ def run_kiterunner(targets, paths, base_latency=5, rate_limit=None):
             "-j", str(parallel_hosts),
             "-x", str(conns_per_host)
         ]
+        if custom_headers:
+            for header in custom_headers:
+                cmd.extend(["-H", header])
         
         debug_path = f"{paths['base']}/debug.txt" if paths and 'base' in paths else None
         res_lines = run_command(cmd, timeout=timeout, debug_path=debug_path, cwd=paths['endpoints'])
@@ -535,7 +546,7 @@ def generate_fuzzable_endpoints(endpoints, paths, default_domain=None):
 # =========================================================
 # 🧠 MAIN PARAM DISCOVERY
 # =========================================================
-def run_param_discovery(domain, endpoints, top_targets, paths, base_latency=5, all_domains=None):
+def run_param_discovery(domain, endpoints, top_targets, paths, base_latency=5, all_domains=None, custom_headers=None):
     print("\n[+] Parameter Discovery (PRO)\n")
 
     # 🌐 Scope filter — discard any endpoints not belonging to any scanned domain before processing
@@ -591,8 +602,8 @@ def run_param_discovery(domain, endpoints, top_targets, paths, base_latency=5, a
         endpoints = unique_list(endpoints + ps_urls)
 
     # 4. Active Discovery (Feeding the Custom Wordlist)
-    arjun_params = run_arjun(top_targets, paths, base_latency=base_latency, custom_wordlist=custom_wordlist_path)
-    x8_params = run_x8(top_targets, paths, base_latency=base_latency, custom_wordlist=custom_wordlist_path)
+    arjun_params = run_arjun(top_targets, paths, base_latency=base_latency, custom_wordlist=custom_wordlist_path, custom_headers=custom_headers)
+    x8_params = run_x8(top_targets, paths, base_latency=base_latency, custom_wordlist=custom_wordlist_path, custom_headers=custom_headers)
 
     # 5. Merge and sanitize all discovered params
     raw_all_params = unique_list(custom_params + arjun_params + x8_params)
